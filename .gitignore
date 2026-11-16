@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+firmware/rp2040-demo/.pio/
+backups/
+.claude/
+*.key
+*.key.pub

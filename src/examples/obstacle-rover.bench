@@ -1,0 +1,31 @@
+{"format":"bench-workshop","version":1,"name":"Obstacle-avoiding rover","parts":[
+{"uid":"chassis","type":"plate","name":"Chassis","params":{"w":12,"h":0.3,"d":9,"material":"plastic","color":"#8fa3b8"},"parent":null,"pos":[0,4.4,0],"rot":[0,0,0,1]},
+{"uid":"motorR","type":"motor-tt","name":"Right motor","params":{},"parent":{"uid":"chassis","body":"body"},"pos":[0,-0.15,3.55],"rot":[0,0,1,0]},
+{"uid":"motorL","type":"motor-tt","name":"Left motor","params":{},"parent":{"uid":"chassis","body":"body"},"pos":[3.2,-0.15,-3.55],"rot":[1,0,0,0]},
+{"uid":"wheelR","type":"wheel","name":"Right wheel","params":{"r":3.3,"width":2.6,"grip":1.2},"parent":{"uid":"motorR","body":"hub"},"pos":[0,0.45,0],"rot":[0,1,0,0]},
+{"uid":"wheelL","type":"wheel","name":"Left wheel","params":{"r":3.3,"width":2.6,"grip":1.2},"parent":{"uid":"motorL","body":"hub"},"pos":[0,0.45,0],"rot":[0,0,0,1]},
+{"uid":"caster","type":"caster","name":"Caster","params":{"r":1.57},"parent":{"uid":"chassis","body":"body"},"pos":[-4.6,-0.15,0],"rot":[0,0,1,0]},
+{"uid":"battery","type":"battery-18650","name":"Batteries (2x 18650, 7.4 V)","params":{"count":"2","charge":100},"parent":{"uid":"chassis","body":"body"},"pos":[-2.2,0.15,0],"rot":[0,0,0,1]},
+{"uid":"post","type":"block","name":"Sensor post","params":{"w":1,"h":3.2,"d":5,"material":"plastic","color":"#d8dce4"},"parent":{"uid":"chassis","body":"body"},"pos":[5.6,0.15,0],"rot":[0,0,0,1]},
+{"uid":"sensor","type":"hcsr04","name":"Distance sensor","params":{},"parent":{"uid":"post","body":"body"},"pos":[0.5,0,0],"rot":[-0.5,-0.5,-0.5,0.5]},
+{"uid":"brain","type":"maker-board","name":"Brain","params":{"usb":false},"parent":{"uid":"chassis","body":"body"},"pos":[2.6,0.15,0],"rot":[0,-0.7071,0,0.7071]},
+{"uid":"driver","type":"drv8833","name":"Motor driver","params":{},"parent":{"uid":"battery","body":"body"},"pos":[0,2.0,0],"rot":[0,0,0,1]},
+{"uid":"wall","type":"block","name":"Wall","params":{"w":2,"h":15,"d":40,"material":"wood","color":"#9b7b5b"},"parent":null,"pos":[60,0,0],"rot":[0,0,0,1],"pinned":true}
+],"wires":[
+{"id":"w1","a":{"uid":"battery","pin":"+"},"b":{"uid":"driver","pin":"VM"},"color":"#e04848"},
+{"id":"w2","a":{"uid":"battery","pin":"-"},"b":{"uid":"driver","pin":"GND"},"color":"#2b2d33"},
+{"id":"w3","a":{"uid":"battery","pin":"+"},"b":{"uid":"brain","pin":"VIN"},"color":"#e04848"},
+{"id":"w4","a":{"uid":"battery","pin":"-"},"b":{"uid":"brain","pin":"GND2"},"color":"#2b2d33"},
+{"id":"w5","a":{"uid":"brain","pin":"GP2"},"b":{"uid":"driver","pin":"AIN1"},"color":"#4f9cff"},
+{"id":"w6","a":{"uid":"brain","pin":"GP3"},"b":{"uid":"driver","pin":"AIN2"},"color":"#4f9cff"},
+{"id":"w7","a":{"uid":"brain","pin":"GP5"},"b":{"uid":"driver","pin":"BIN1"},"color":"#3fbf7f"},
+{"id":"w8","a":{"uid":"brain","pin":"GP6"},"b":{"uid":"driver","pin":"BIN2"},"color":"#3fbf7f"},
+{"id":"w9","a":{"uid":"driver","pin":"AOUT1"},"b":{"uid":"motorR","pin":"M+"},"color":"#e8c547"},
+{"id":"w10","a":{"uid":"driver","pin":"AOUT2"},"b":{"uid":"motorR","pin":"M-"},"color":"#ff9d3a"},
+{"id":"w11","a":{"uid":"driver","pin":"BOUT1"},"b":{"uid":"motorL","pin":"M+"},"color":"#e8c547"},
+{"id":"w12","a":{"uid":"driver","pin":"BOUT2"},"b":{"uid":"motorL","pin":"M-"},"color":"#ff9d3a"},
+{"id":"w13","a":{"uid":"brain","pin":"5V"},"b":{"uid":"sensor","pin":"VCC"},"color":"#e04848"},
+{"id":"w14","a":{"uid":"brain","pin":"GND"},"b":{"uid":"sensor","pin":"GND"},"color":"#2b2d33"},
+{"id":"w15","a":{"uid":"brain","pin":"GP10"},"b":{"uid":"sensor","pin":"TRIG"},"color":"#f2f2f2"},
+{"id":"w16","a":{"uid":"brain","pin":"GP11"},"b":{"uid":"sensor","pin":"ECHO"},"color":"#b46bff"}
+],"programs":{"brain":{"lang":"arduino","source":"@obstacle-rover.ino"}},"boards":[]}

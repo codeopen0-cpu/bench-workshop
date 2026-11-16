@@ -1,0 +1,25 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "Servo arm",
+ "parts": [
+  {"uid": "stand", "type": "block", "name": "Stand", "params": {"w": 4, "h": 18, "d": 4, "material": "wood", "color": "#c98a4b"}, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1], "pinned": true},
+  {"uid": "servo", "type": "servo-mg996r", "name": "Shoulder servo", "params": {"start": 0}, "parent": {"uid": "stand", "body": "body"}, "pos": [2, 5.5, 0], "rot": [0.5, 0.5, -0.5, 0.5]},
+  {"uid": "arm", "type": "block", "name": "Arm", "params": {"w": 12, "h": 0.4, "d": 2, "material": "plastic", "color": "#d8dce4"}, "parent": {"uid": "servo", "body": "horn"}, "pos": [4.5, 0.12, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "weight", "type": "block", "name": "Weight", "params": {"w": 2, "h": 2, "d": 2, "material": "steel", "color": "#7d848f"}, "parent": {"uid": "arm", "body": "body"}, "pos": [5, 0.2, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "board", "type": "maker-board", "name": "Board", "params": {"usb": true}, "parent": null, "pos": [-9, 0, -4], "rot": [0, 0, 0, 1]},
+  {"uid": "battery", "type": "battery-4aa", "name": "Servo battery (4x AA)", "params": {"count": "4", "cells": "alkaline", "charge": 100}, "parent": null, "pos": [-9, 0, 6], "rot": [0, 0, 0, 1]},
+  {"uid": "knob", "type": "knob", "name": "Knob", "params": {"start": 50}, "parent": null, "pos": [-15, 0, -4], "rot": [0, 0, 0, 1]}
+ ],
+ "wires": [
+  {"id": "w1", "a": {"uid": "board", "pin": "GP15"}, "b": {"uid": "servo", "pin": "SIG"}, "color": "#f08c2a"},
+  {"id": "w2", "a": {"uid": "battery", "pin": "+"}, "b": {"uid": "servo", "pin": "V+"}, "color": "#e04848"},
+  {"id": "w3", "a": {"uid": "battery", "pin": "-"}, "b": {"uid": "servo", "pin": "GND"}, "color": "#6b4226"},
+  {"id": "w4", "a": {"uid": "battery", "pin": "-"}, "b": {"uid": "board", "pin": "GND2"}, "color": "#2b2d33"},
+  {"id": "w5", "a": {"uid": "board", "pin": "3V3"}, "b": {"uid": "knob", "pin": "H"}, "color": "#e04848"},
+  {"id": "w6", "a": {"uid": "board", "pin": "GND"}, "b": {"uid": "knob", "pin": "L"}, "color": "#2b2d33"},
+  {"id": "w7", "a": {"uid": "board", "pin": "A0"}, "b": {"uid": "knob", "pin": "W"}, "color": "#e8c547"}
+ ],
+ "programs": {"board": {"lang": "arduino", "source": "@servo-arm.ino"}},
+ "boards": []
+}

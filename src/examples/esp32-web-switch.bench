@@ -1,0 +1,20 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "ESP32 web switch",
+ "wifi": { "ssid": "Workshop", "pass": "bench1234" },
+ "parts": [
+  {"uid": "esp", "type": "esp32-board", "name": "ESP32", "params": {"usb": true}, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "led", "type": "led", "name": "LED", "params": {"color": "green"}, "parent": null, "pos": [5, 0, -1], "rot": [0, 0, 0, 1]},
+  {"uid": "knob", "type": "knob", "name": "Knob", "params": {}, "parent": null, "pos": [-5, 0, 1], "rot": [0, 0, 0, 1]}
+ ],
+ "wires": [
+  {"id": "w1", "a": {"uid": "esp", "pin": "IO4"}, "b": {"uid": "led", "pin": "A"}, "color": "#3fbf7f", "length": 7},
+  {"id": "w2", "a": {"uid": "esp", "pin": "GND2"}, "b": {"uid": "led", "pin": "K"}, "color": "#2b2d33", "length": 7},
+  {"id": "w3", "a": {"uid": "esp", "pin": "3V3"}, "b": {"uid": "knob", "pin": "H"}, "color": "#e04848", "length": 8},
+  {"id": "w4", "a": {"uid": "esp", "pin": "GND"}, "b": {"uid": "knob", "pin": "L"}, "color": "#2b2d33", "length": 8},
+  {"id": "w5", "a": {"uid": "esp", "pin": "IO34"}, "b": {"uid": "knob", "pin": "W"}, "color": "#e8c547", "length": 8}
+ ],
+ "programs": {"esp": {"lang": "arduino", "source": "@esp32-web-switch.ino"}},
+ "boards": []
+}

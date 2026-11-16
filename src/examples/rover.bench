@@ -1,0 +1,15 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "Two-wheel rover",
+ "parts": [
+  {"uid": "chassis", "type": "plate", "name": "Chassis", "params": {"w": 12, "h": 0.3, "d": 9, "material": "plastic", "color": "#8fa3b8"}, "parent": null, "pos": [0, 4.4, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "motorR", "type": "motor-tt", "name": "Right motor", "params": {}, "parent": {"uid": "chassis", "body": "body"}, "pos": [0, -0.15, 3.55], "rot": [0, 0, 1, 0]},
+  {"uid": "motorL", "type": "motor-tt", "name": "Left motor", "params": {}, "parent": {"uid": "chassis", "body": "body"}, "pos": [3.2, -0.15, -3.55], "rot": [1, 0, 0, 0]},
+  {"uid": "wheelR", "type": "wheel", "name": "Right wheel", "params": {"r": 3.3, "width": 2.6, "grip": 1.2}, "parent": {"uid": "motorR", "body": "hub"}, "pos": [0, 0.45, 0], "rot": [0, 1, 0, 0]},
+  {"uid": "wheelL", "type": "wheel", "name": "Left wheel", "params": {"r": 3.3, "width": 2.6, "grip": 1.2}, "parent": {"uid": "motorL", "body": "hub"}, "pos": [0, 0.45, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "caster", "type": "caster", "name": "Caster", "params": {"r": 1.57}, "parent": {"uid": "chassis", "body": "body"}, "pos": [-4.6, -0.15, 0], "rot": [0, 0, 1, 0]},
+  {"uid": "battery", "type": "battery-4aa", "name": "Batteries", "params": {}, "parent": {"uid": "chassis", "body": "body"}, "pos": [-1.5, 0.15, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "board", "type": "board-proto", "name": "Controller", "params": {"w": 3.5, "d": 6, "color": "#2f7d4f"}, "parent": {"uid": "chassis", "body": "body"}, "pos": [4, 0.15, 0], "rot": [0, 0, 0, 1]}
+ ]
+}

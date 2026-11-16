@@ -1,0 +1,39 @@
+{
+  "name": "bench-workshop",
+  "private": true,
+  "version": "0.5.0",
+  "description": "Bench Workshop: a 3D workbench with physics to build, wire, program and test boards and the things they drive.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "tauri": "tauri",
+    "app": "tauri dev",
+    "release": "tauri build"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-dialog": "2.8.4",
+    "@tauri-apps/plugin-fs": "2.7.1",
+    "@tauri-apps/plugin-http": "^2.9.0",
+    "@tauri-apps/plugin-opener": "^2.7.3",
+    "@tauri-apps/plugin-process": "2.4.0",
+    "@tauri-apps/plugin-updater": "2.14.1",
+    "monaco-editor": "0.57.0",
+    "rp2040js": "1.4.2",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "@types/three": "0.187.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codeopen0-cpu/bench-workshop.git"
+  }
+}

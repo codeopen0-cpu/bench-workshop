@@ -1,0 +1,26 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "RP2040 and I2C modules",
+ "parts": [
+  {"uid": "rp", "type": "rp2040-board", "name": "RP2040 board", "params": {"usb": true}, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "imu", "type": "mpu6050", "name": "Motion sensor", "params": {"addr": "104"}, "parent": null, "pos": [6, 0, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "pca", "type": "pca9685", "name": "Servo driver", "params": {"addr": "65"}, "parent": null, "pos": [0, 0, 8], "rot": [0, 0, 0, 1]},
+  {"uid": "servo", "type": "servo-sg90", "name": "Servo", "params": {"start": 0}, "parent": null, "pos": [0, 0, 16], "rot": [0, 0, 0, 1]}
+ ],
+ "wires": [
+  {"id": "w1", "a": {"uid": "rp", "pin": "3V3"}, "b": {"uid": "imu", "pin": "VCC"}, "color": "#e04848", "length": 7.5},
+  {"id": "w2", "a": {"uid": "rp", "pin": "GND"}, "b": {"uid": "imu", "pin": "GND"}, "color": "#2b2d33", "length": 10},
+  {"id": "w3", "a": {"uid": "rp", "pin": "GP4"}, "b": {"uid": "imu", "pin": "SDA"}, "color": "#4f9cff", "length": 10.5},
+  {"id": "w4", "a": {"uid": "rp", "pin": "GP5"}, "b": {"uid": "imu", "pin": "SCL"}, "color": "#e8c547", "length": 10},
+  {"id": "w5", "a": {"uid": "rp", "pin": "3V3"}, "b": {"uid": "pca", "pin": "VCC"}, "color": "#e04848", "length": 14},
+  {"id": "w6", "a": {"uid": "rp", "pin": "GND2"}, "b": {"uid": "pca", "pin": "GND"}, "color": "#2b2d33", "length": 13},
+  {"id": "w7", "a": {"uid": "rp", "pin": "GP4"}, "b": {"uid": "pca", "pin": "SDA"}, "color": "#4f9cff", "length": 13.5},
+  {"id": "w8", "a": {"uid": "rp", "pin": "GP5"}, "b": {"uid": "pca", "pin": "SCL"}, "color": "#e8c547", "length": 13.5},
+  {"id": "w9", "a": {"uid": "pca", "pin": "S0"}, "b": {"uid": "servo", "pin": "SIG"}, "color": "#ff9d3a", "length": 12.5},
+  {"id": "w10", "a": {"uid": "rp", "pin": "VBUS"}, "b": {"uid": "servo", "pin": "V+"}, "color": "#e04848", "length": 23},
+  {"id": "w11", "a": {"uid": "rp", "pin": "GND3"}, "b": {"uid": "servo", "pin": "GND"}, "color": "#2b2d33", "length": 19}
+ ],
+ "programs": {},
+ "boards": []
+}

@@ -1,0 +1,26 @@
+{"format":"bench-workshop","version":1,"name":"Wi-Fi remote-control rover","wifi":{"ssid":"Workshop","pass":"bench1234"},"parts":[
+{"uid":"chassis","type":"plate","name":"Chassis","params":{"w":12,"h":0.3,"d":9,"material":"plastic","color":"#8fa3b8"},"parent":null,"pos":[0,4.4,0],"rot":[0,0,0,1]},
+{"uid":"motorR","type":"motor-tt","name":"Right motor","params":{},"parent":{"uid":"chassis","body":"body"},"pos":[0,-0.15,3.55],"rot":[0,0,1,0]},
+{"uid":"motorL","type":"motor-tt","name":"Left motor","params":{},"parent":{"uid":"chassis","body":"body"},"pos":[3.2,-0.15,-3.55],"rot":[1,0,0,0]},
+{"uid":"wheelR","type":"wheel","name":"Right wheel","params":{"r":3.3,"width":2.6,"grip":1.2},"parent":{"uid":"motorR","body":"hub"},"pos":[0,0.45,0],"rot":[0,1,0,0]},
+{"uid":"wheelL","type":"wheel","name":"Left wheel","params":{"r":3.3,"width":2.6,"grip":1.2},"parent":{"uid":"motorL","body":"hub"},"pos":[0,0.45,0],"rot":[0,0,0,1]},
+{"uid":"caster","type":"caster","name":"Caster","params":{"r":1.57},"parent":{"uid":"chassis","body":"body"},"pos":[-4.6,-0.15,0],"rot":[0,0,1,0]},
+{"uid":"battery","type":"battery-18650","name":"Batteries (2x 18650, 7.4 V)","params":{"count":"2","charge":100},"parent":{"uid":"chassis","body":"body"},"pos":[-2.6,0.15,0],"rot":[0,0,0,1]},
+{"uid":"driver","type":"l298n","name":"L298N","params":{"jumpers":false},"parent":{"uid":"battery","body":"body"},"pos":[0,2.0,0],"rot":[0,0.7071,0,0.7071]},
+{"uid":"brain","type":"esp32-board","name":"ESP32","params":{"usb":false},"parent":{"uid":"chassis","body":"body"},"pos":[3.0,0.15,0],"rot":[0,0,0,1]}
+],"wires":[
+{"id":"w1","a":{"uid":"battery","pin":"+"},"b":{"uid":"driver","pin":"12V"},"color":"#e04848"},
+{"id":"w2","a":{"uid":"battery","pin":"-"},"b":{"uid":"driver","pin":"GND"},"color":"#2b2d33"},
+{"id":"w3","a":{"uid":"battery","pin":"+"},"b":{"uid":"brain","pin":"5V"},"color":"#e04848"},
+{"id":"w4","a":{"uid":"battery","pin":"-"},"b":{"uid":"brain","pin":"GND"},"color":"#2b2d33"},
+{"id":"w5","a":{"uid":"brain","pin":"IO25"},"b":{"uid":"driver","pin":"IN1"},"color":"#4f9cff"},
+{"id":"w6","a":{"uid":"brain","pin":"IO26"},"b":{"uid":"driver","pin":"IN2"},"color":"#4f9cff"},
+{"id":"w7","a":{"uid":"brain","pin":"IO27"},"b":{"uid":"driver","pin":"ENA"},"color":"#ff9d3a"},
+{"id":"w8","a":{"uid":"brain","pin":"IO32"},"b":{"uid":"driver","pin":"IN3"},"color":"#3fbf7f"},
+{"id":"w9","a":{"uid":"brain","pin":"IO33"},"b":{"uid":"driver","pin":"IN4"},"color":"#3fbf7f"},
+{"id":"w10","a":{"uid":"brain","pin":"IO14"},"b":{"uid":"driver","pin":"ENB"},"color":"#ff9d3a"},
+{"id":"w11","a":{"uid":"driver","pin":"OUT1"},"b":{"uid":"motorL","pin":"M+"},"color":"#e8c547"},
+{"id":"w12","a":{"uid":"driver","pin":"OUT2"},"b":{"uid":"motorL","pin":"M-"},"color":"#b46bff"},
+{"id":"w13","a":{"uid":"driver","pin":"OUT3"},"b":{"uid":"motorR","pin":"M-"},"color":"#e8c547"},
+{"id":"w14","a":{"uid":"driver","pin":"OUT4"},"b":{"uid":"motorR","pin":"M+"},"color":"#b46bff"}
+],"programs":{"brain":{"lang":"arduino","source":"@wifi-rover.ino"}},"boards":[]}
