@@ -10,6 +10,8 @@ export interface HostEvents {
   state(s: string): void;
 }
 export interface Requests {
+  /** ESP-NOW: a message (JSON: to, from, len, bytes, obj) to the other boards; how many took it */
+  espnow?(json: string): number;
   /** an emulated chip may take a few steps to answer: then a Promise */
   i2cWrite(addr: number, bytes: number[]): boolean | Promise<boolean>;
   i2cRead(addr: number, n: number): number[] | null | Promise<number[] | null>;
@@ -91,6 +93,7 @@ export class SketchHost {
       try { cfg = JSON.parse(new TextDecoder().decode(this.sh.req.slice(0, a1 || 512)).replace(/[\u0000]+$/, '')); } catch { /* none */ }
       finish(r.wifiJoin ? r.wifiJoin(a0, cfg.ssid, cfg.pass) : 0);
     } else if (type === REQ.HTTP_LISTEN) finish(r.httpListen?.(a0) ? 0 : 2);
+    else if (type === REQ.ESPNOW) finish(r.espnow ? r.espnow(new TextDecoder().decode(this.sh.req.slice(0, a0))) : 0);
     else finish(2);
   }
 

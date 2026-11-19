@@ -44,7 +44,9 @@ export const HTTP_REQ_MAX = 64 * 1024;
 export const HTTP_RESP_MAX = 1024 * 1024;
 export const EVENTS = 8192;
 
-export const REQ = { I2C_WRITE: 1, I2C_READ: 2, PULSE_IN: 3, WIFI_JOIN: 4, HTTP_LISTEN: 5, SPI: 6 } as const;
+export const REQ = { I2C_WRITE: 1, I2C_READ: 2, PULSE_IN: 3, WIFI_JOIN: 4, HTTP_LISTEN: 5, SPI: 6, ESPNOW: 7 } as const;
+/** the pin number ESP-NOW messages arrive on (no real pin: the radio) */
+export const ESPNOW_PIN = 254;
 export const MODE = { INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, INPUT_PULLDOWN: 3, UNUSED: -1 } as const;
 
 // where each array starts in the shared memory (one after another, sized by PINS)

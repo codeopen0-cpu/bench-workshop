@@ -129,12 +129,25 @@ export interface MechDef {
   group?: number;
 }
 
+/** A motor with a propeller (sim.ts, thrusters): its ESC sets the throttle; the simulation spins the
+ *  rotor up and down and pushes the body along `axis` (body frame) at `at`, by the propeller formulas. */
+export interface ThrusterDef {
+  body: string;
+  at: V3;
+  axis: V3;
+  kv: number; // rpm per volt
+  propIn: number; // propeller diameter, inches
+  pitchIn: number;
+  dir: 1 | -1; // the way its propeller is made to turn (1 = clockwise seen from above)
+}
+
 export interface PartBuild {
   bodies: BodyDef[];
   joints: JointDef[];
   pins?: PinDef[];
   ports?: PortDef[];
   mech?: MechDef[];
+  thruster?: ThrusterDef;
 }
 
 export interface PartType {

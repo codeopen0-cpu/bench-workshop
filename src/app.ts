@@ -11,6 +11,9 @@ import { Dock } from './ui/dock';
 import { LibrariesWindow } from './ui/libraries';
 import { importKicad, importModel, makePart } from './ui/partmaker';
 import { applyUiScale, autoUiScale, setUiScale, uiScaleSetting, watchUiScale } from './ui/uiscale';
+import { PadInput } from './ui/gamepad';
+import { Instruments } from './ui/instruments';
+import { openSheets } from './ui/sheets';
 import { WebView } from './ui/webview';
 import { CheckWindow } from './ui/checkwin';
 import { Tutorial } from './ui/tutorial';
@@ -48,6 +51,25 @@ export class App {
   placing: { type: PartType; ghost: PartView; spin: number; valid: boolean; hit: ReturnType<Stage['pick']> } | null = null;
   gluing: string | null = null; // picking what the selected part gets glued to
   belting: string | null = null; // picking the pulley the selected one gets a belt to
+  /** a game pad / the keyboard playing a PS2 controller library's receiver */
+  private pad = new PadInput();
+  /** the ruler and the multimeter (made when first used) */
+  private _ins: Instruments | null = null;
+  get ins() {
+    if (!this._ins) {
+      this._ins = new Instruments({
+        stage: this.stage,
+        pinAt: (ev) => this.pinAt(ev),
+        pinWorld: (ref, out) => !!pinWorld(this.views, ref, out),
+        circuit: () => this.circuit,
+        pinLabel: (ref) => this.pinLabel(ref),
+        hint: (t) => this.hint(t),
+        pickRoots: () => [this.mode === 'build' ? this.stage.partsRoot : this.stage.runRoot],
+      });
+      this._ins.onChange = () => this.refreshAll();
+    }
+    return this._ins;
+  }
   sim: Sim | null = null;
   circuit: Circuit | null = null;
   wiring = false; // wire mode: click pin, then pin
@@ -1037,6 +1059,8 @@ export class App {
     this.last = t;
     this.fps = this.fps * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
     if (this.sim && this.mode === 'run') {
+      // a game pad or the keyboard playing a PS2 controller's receiver, if one is on the bench
+      if (this.circuit) this.pad.update(this.circuit.devices);
       this.acc += dt * this.speed;
       let n = 0;
       while (this.acc >= STEP && n < 40) {
@@ -1063,6 +1087,7 @@ export class App {
     this.wires.sync(broken?.size ? this.project.wires.filter((w) => !broken.has(w.id)) : this.project.wires, this.views, this.selectedWire);
     if (Math.floor(t / 200) !== Math.floor((t - dt * 1000) / 200)) this.refreshReadouts();
     if (this.project.belts?.length || this.beltMeshes.size) this.drawBelts();
+    this._ins?.update();
     this.stage.render();
     requestAnimationFrame((x) => this.frame(x));
   }
@@ -1239,6 +1264,7 @@ export class App {
     c.addEventListener('pointerdown', (ev) => {
       this.pointerDown = { x: ev.clientX, y: ev.clientY, button: ev.button };
       this.lastPointer = ev;
+      if (this.mode !== 'build' && ev.button === 0 && this._ins?.mode) { this._ins.click(ev); return; }
       if (this.mode !== 'build' && ev.button === 0 && this.sim) {
         const hit = this.stage.pick(ev, [this.stage.runRoot], false);
         const dev = hit && this.circuit?.devices.find((d) => d.view.inst.uid === hit.object.userData.uid && d.press);
@@ -1329,6 +1355,7 @@ export class App {
         return;
       }
       if (!d || d.button !== 0 || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 5) return; // that was a camera drag
+      if (this.mode === 'build' && this._ins?.mode) { this._ins.click(ev); return; }
       if (this.mode !== 'build') return;
       if ((this.stage.gizmo as any).dragging) return;
       if (this.placing) return this.placingClick(ev);
@@ -1398,6 +1425,7 @@ export class App {
       const tag = (ev.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const k = ev.key.toLowerCase();
+      if (this.mode === 'run' && !ev.ctrlKey && this.pad.claims(ev.key)) return; // (a PS2 pad is being played)
       if ((ev.ctrlKey || ev.metaKey) && k === 'f' && this.catSearch && !document.querySelector('.modal')) {
         ev.preventDefault(); // Ctrl+F: search the parts list
         this.catSearch.focus();
@@ -1425,7 +1453,8 @@ export class App {
       else if (ev.ctrlKey && k === 'd') { ev.preventDefault(); this.duplicateSelected(); }
       else if (k === ' ') { ev.preventDefault(); this.mode === 'build' ? this.run() : this.pause(); }
       else if (k === 'escape') {
-        if (this.placing) this.cancelPlacing();
+        if (this._ins?.mode) this._ins.setMode(this._ins.mode);
+        else if (this.placing) this.cancelPlacing();
         else if (this.wireStart) { this.wireStart = null; this.rubber.visible = false; this.refreshAll(); }
         else if (this.wiring) this.toggleWiring(false);
         else if (this.mode !== 'build') this.stop();
@@ -1433,6 +1462,8 @@ export class App {
       }
       else if (k === 'delete' || k === 'backspace') { if (this.selectedWire && this.mode === 'build') this.deleteWire(this.selectedWire); else this.deleteSelected(); }
       else if (k === 'c' && !ev.ctrlKey) this.toggleWiring();
+      else if (k === 'm' && !ev.ctrlKey) this.ins.setMode('ruler');
+      else if (k === 'v' && !ev.ctrlKey) this.ins.setMode('meter');
       else if (k === 'r') {
         if (this.placing) { this.placing.spin += Math.PI / 2; this.refreshAll(); }
         else if (this.selected && this.mode === 'build') {
@@ -1688,6 +1719,9 @@ export class App {
       el('div', { className: 'sep' }),
       b('wire', 'Wire', 'Wire tool (C): click a pin, then another pin', () => this.toggleWiring()),
       b('program', 'Program', 'Edit the selected board\'s program, and see its serial monitor', () => this.openProgram()),
+      b('ruler', 'Ruler', 'Measure the distance between two points (M)', () => this.ins.setMode('ruler')),
+      b('meter', 'Meter', 'A multimeter: click a pin for its volts, a second pin for the volts between them; live while running (V)', () => this.ins.setMode('meter')),
+      b('sheets', 'Parts list', 'What to buy (with rough prices) and a wiring sheet, to build it for real', () => openSheets({ project: () => this.project, views: () => this.views, typeOf: (id) => PART_BY_ID.get(id), stage: this.stage, log: (m, l) => this.log(m, l) })),
       b('check', 'Check', 'Check the wiring for mistakes (shorts, reversed or too-high supplies, missing power...) without running', () => this.checker.open()),
       el('div', { className: 'sep' }),
       b('run', 'Run', 'Start the physics (Space)', () => this.run(), 'primary'),
@@ -1786,6 +1820,8 @@ export class App {
     this.toolbarButtons.pause.textContent = m === 'paused' ? 'Carry on' : 'Pause';
     benchAudio.setPaused(m !== 'run');
     this.toolbarButtons.wire.classList.toggle('active', this.wiring);
+    this.toolbarButtons.ruler?.classList.toggle('active', this._ins?.mode === 'ruler');
+    this.toolbarButtons.meter?.classList.toggle('active', this._ins?.mode === 'meter');
     this.toolbarButtons.program.disabled = !this.programmableSelected();
     for (const item of this.dom.catalog.querySelectorAll<HTMLElement>('.cat-item')) item.classList.toggle('placing', !!item.dataset.type && this.placing?.type.id === item.dataset.type);
     this.statusEls.parts.textContent = `${this.project.parts.length} parts`;
@@ -2030,7 +2066,10 @@ export class App {
       'Wire (C): click a pin, then another. Program: write the selected board\'s code. ' +
       'Finding a part: type in the search box at the top of the parts list (Ctrl+F; Enter picks the first one). The Libraries window has its own search. ' +
       'Mechanics: gears mesh when their teeth meet (by tooth count); pulleys turn together through a belt (select one, Belt to...); an Axle (free) holds gears and pulleys; a Tank track has its own motor; mecanum and omni wheels drive any way. ' +
+      'ESP32s talk to each other with ESP-NOW (esp_now.h, by MAC address), and BluetoothSerial shows in the serial monitor marked [BT]. A PS2 controller (library) is played with a game pad plugged into this PC, or the keyboard (arrows, 1-4, Q / E, Enter, I J K L). ' +
+      'Flying: a Brushless motor + propeller on an ESC (servo signal from a board: 1000 us to arm, up to 2000 for full thrust); wired straight it turns clockwise, two phase wires swapped counter-clockwise, to suit its propeller. ' +
       'The move / turn arrows sit at the centre of the selected part (Grid menu: or its centre of mass, or its base). ' +
+      'Ruler (M): click two points for the distance. Meter (V): a multimeter: click a pin (red probe), then another (black); it reads live while running. Parts list: what to buy with rough prices, and a wiring sheet to copy, save or print. ' +
       'Your own designs: My boards > Import 3D model (.stl) makes a part of it (its look, its weight, and a solid shape that keeps holes and hollows open). ' +
       'Grid (toolbar, G): parts snap to it when placed or moved; a part you put things on gets its own grid that fits it (odd sizes too), shown as blue dots. UI (toolbar): how big the buttons and text are; auto follows your display settings and screen. ' +
       'Your own boards: My boards (bottom of the parts list) > Import KiCad board or Make a part. Libraries: add-on parts to download. ' +

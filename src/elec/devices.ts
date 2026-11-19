@@ -6,7 +6,7 @@ import type { PinDef } from '../parts/types';
 import type { Program, Project } from '../project';
 import { arduinoToJs } from '../sketch/arduino';
 import { SketchHost } from '../sketch/host';
-import { CTL, IN_EVENTS, MODE, SPI_SNAP } from '../sketch/layout';
+import { CTL, ESPNOW_PIN, IN_EVENTS, MODE, SPI_SNAP } from '../sketch/layout';
 import type { PartView } from '../views';
 import type { Circuit, Device, I2CChip } from './circuit';
 
@@ -33,7 +33,7 @@ const wifiLine = (i: { status: number; ip: string; ap: string | null; server: { 
 export const sketchLibraries = {
   resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[] } => ({ libs: [], classes: [], missing: includes }),
 };
-const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|avr\/.*)\.h$/;
+const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|avr\/.*)\.h$/;
 export const lensMeshes = (v: PartView, flag: string) => {
   const out: THREE.Mesh[] = [];
   for (const b of v.bodies.values()) b.traverse((m) => m.userData[flag] && (m as THREE.Mesh).isMesh && out.push(m as THREE.Mesh));
@@ -342,6 +342,12 @@ export interface BoardSpec {
 /** A board running a program (in its own thread). Drives its pins from the program, feeds inputs back. */
 export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): Device {
   const uid = v.inst.uid;
+  // its MAC address: its own, from its part's id (ESP-NOW addresses boards by it)
+  let h = 2166136261;
+  for (const ch of uid) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const macNumber = (h >>> 8) & 0xffffff;
+  const macString = ['24', '6f', '28', ((macNumber >> 16) & 255).toString(16).padStart(2, '0'), ((macNumber >> 8) & 255).toString(16).padStart(2, '0'), (macNumber & 255).toString(16).padStart(2, '0')].join(':');
+  let espnowSent = 0;
   const byNum = new Map(Object.entries(spec.pins).map(([id, n]) => [n, id]));
   const ledMeshes = lensMeshes(v, 'builtinLed');
   let host: SketchHost | null = null;
@@ -356,7 +362,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const includes = [...code.matchAll(/^\s*(?:\/\/\s*)?#\s*include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]).filter((x) => !BUILTIN_INCLUDES.test(x));
     const libs = sketchLibraries.resolve(includes);
     for (const m of libs.missing) c.warnOnce(`inc:${uid}:${m}`, `${name(v)}'s program includes ${m}, which no installed library has: find it under Libraries`, 'bad');
-    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences'], { ARDUINO: 10819, ...spec.defines });
+    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences', 'esp_now_peer_info_t', 'BluetoothSerial'], { ARDUINO: 10819, ...spec.defines });
     else code = code.replace(/^\s*#\s*include.*$/gm, '');
     const constants: Record<string, number> = { ...spec.defines, ...spec.constants };
     for (const [id, n] of Object.entries(spec.pins)) if (/^[A-Za-z_]\w*$/.test(id) && !/^GP\d+$/.test(id)) constants[id] = n;
@@ -365,6 +371,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       if (m) constants[`D${m[1]}`] = n;
     }
     if (spec.builtinLed !== undefined) constants.LED_BUILTIN = spec.builtinLed;
+    if (spec.wifi) constants.__MAC = macNumber;
     if (spec.spi) {
       constants.SCK = spec.pins[spec.spi.sck];
       constants.MOSI = spec.pins[spec.spi.mosi];
@@ -445,8 +452,11 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const fix = (x: number[] | void) => (misoOk && x ? bytes.map((_, i) => (x[i] ?? 0xff) & 255) : none());
     return r instanceof Promise ? r.then(fix) : fix(r);
   };
-  const dev: Device = {
+  const dev: Device & { espnowMac?: string; espnowIn?: (bytes: number[]) => boolean } = {
     view: v,
+    // (its radio: ESP-NOW messages for its MAC, or for everyone, arrive here)
+    espnowMac: spec.wifi ? macString : undefined,
+    espnowIn: spec.wifi ? (bytes) => !!host && host.givePacket(ESPNOW_PIN, 'data', bytes, 0) : undefined,
     shorts: () => spec.shorts ?? [],
     i2c: spec.i2c ? { ...spec.i2c, chips: [] } : undefined,
     drive(c) {
@@ -489,6 +499,21 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
           h.setWifi(st.status, ipToInt(st.ip));
           wifiShown = `${st.status} ${st.ip}`;
           return s;
+        },
+        espnow: (json) => {
+          // to every other powered board with a radio whose MAC it's for (or all: broadcast)
+          let msg: any;
+          try { msg = JSON.parse(json); } catch { return 0; }
+          const bytes = Array.from(new TextEncoder().encode(json));
+          let got = 0;
+          for (const d of c.devices as (Device & { espnowMac?: string; espnowIn?: (b: number[]) => boolean })[]) {
+            if (d === dev || !d.espnowIn || !d.espnowMac) continue;
+            if (msg.to !== 'ff:ff:ff:ff:ff:ff' && msg.to !== d.espnowMac) continue;
+            if (d.espnowIn(bytes)) got++;
+          }
+          espnowSent++;
+          if (espnowSent <= 3) console.info(`[espnow] ${name(v)} (${macString}) -> ${msg.to}: ${msg.len} bytes, ${got} board(s) took it`);
+          return got;
         },
         httpListen: (port) => {
           if (!hooks.net) return false;

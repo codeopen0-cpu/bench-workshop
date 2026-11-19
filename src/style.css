@@ -224,3 +224,20 @@ h3 { margin: 4px 0 8px; font-size: 12px; text-transform: uppercase; letter-spaci
 .tb-row span { flex: 1; }
 .tb-note { color: var(--dim); font-size: 12px; line-height: 1.4; }
 .tb-select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 4px; }
+
+/* the ruler's and multimeter's reading, next to what's measured */
+.instrument-label {
+  position: fixed; z-index: 30; pointer-events: none; white-space: pre; font: 12px/1.35 ui-monospace, Consolas, monospace;
+  background: rgba(14, 16, 20, 0.88); color: #e8eef6; border: 1px solid #3fa9ff; border-radius: 6px; padding: 5px 8px;
+}
+.instrument-label[hidden] { display: none; }
+
+/* the parts list and wiring sheet */
+.sheet-window { width: min(900px, 94vw); }
+.sheet-body { padding: 12px 16px; overflow: auto; max-height: 64vh; }
+.sheet-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.sheet-table th, .sheet-table td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+.sheet-table th { color: var(--dim); font-weight: 600; }
+.sheet-note { color: var(--dim); font-size: 12px; margin-top: 10px; }
+.sheet-img { display: block; margin: 0 auto; max-width: 100%; max-height: 46vh; border: 1px solid var(--line); border-radius: 6px; }
+.sheet-nets { font-size: 13px; line-height: 1.6; padding-left: 22px; }

@@ -3,6 +3,7 @@
 // driven by a motor with the actuator's real torque limit and speed.
 import type RAPIER_NS from '@dimforge/rapier3d-compat';
 import { Mechanics } from './mechanics';
+import { drawThruster, stepThruster, type Thruster } from './thrusters';
 import { placeTrackLinks, type TrackLook } from './parts/mechanics';
 import * as THREE from 'three';
 import { GRAVITY, KGCM, type ActuatorSpec, type JointDef, type Shape } from './parts/types';
@@ -90,6 +91,17 @@ export class Sim {
   /** gears, belts, tank tracks, roller wheels */
   mech!: Mechanics;
   private tracks: { data: TrackLook; act: Actuator }[] = [];
+  /** brushless motors with propellers, by part uid */
+  thrusters = new Map<string, Thruster>();
+  /** From an ESC: how hard its motor goes (0..1), on how many volts, which way its phases turn it. */
+  setThruster(uid: string, throttle: number, volts: number, phase: 1 | -1 = 1) {
+    const t = this.thrusters.get(uid);
+    if (!t) return null;
+    t.throttle = Math.max(0, Math.min(1, throttle));
+    t.volts = Math.max(0, volts);
+    t.phase = phase;
+    return t;
+  }
   /** the pushing ball: follows the mouse while you hold Shift (it shoves things) */
   private hand: { rb: RAPIER_NS.RigidBody; col: RAPIER_NS.Collider; on: boolean } | null = null;
   /** what a hand can do: about 60 N (lifts 6 kg), and turn things with about 3 N*m */
@@ -163,6 +175,10 @@ export class Sim {
       }
       centre.multiplyScalar(1 / Math.max(massSum, 1e-6));
       const desc = (fixed ? R.RigidBodyDesc.fixed() : R.RigidBodyDesc.dynamic()).setTranslation(centre.x, centre.y, centre.z);
+      // (never put to sleep: with the engine counting in cm, "at rest" became anything slower than
+      //  40 cm/s, and a 1.5 cm/s linear actuator, a slow servo or a creeping robot stopped dead after
+      //  a moment. The bench's scenes are small: staying awake costs little.)
+      if (!fixed) desc.setCanSleep(false);
       const rb = this.world.createRigidBody(desc);
       // (a loose ball gets rolling resistance: the engine has none, and a ball nudged across a table
       //  would roll on forever; a real one stops within a metre or two. Wheels on axles are joints,
@@ -254,6 +270,26 @@ export class Sim {
         this.mech.add({ def: d, view: v, rb: g.rb, local: c.sub(new THREE.Vector3(t.x, t.y, t.z)), axisL: n, colliders: this.bodyColliders.get(keyOf(v.inst.uid, d.body)) ?? [], grip: Number(v.inst.params.grip ?? 1) });
       }
     if (this.mech.items.length) this.mech.link(belts);
+
+    // brushless motors with propellers (thrusters.ts): their ESC sets them going
+    for (const v of views) {
+      const d = v.build.thruster;
+      const obj = d && v.bodies.get(d.body), g = d && this.byKey.get(keyOf(v.inst.uid, d.body));
+      if (!d || !obj || !g) continue;
+      const c = new THREE.Vector3(...d.at).applyMatrix4(obj.matrixWorld);
+      const t = g.rb.translation();
+      const blades: THREE.Object3D[] = [], discs: THREE.Object3D[] = [];
+      obj.traverse((o) => { if (o.userData.prop) blades.push(o); if (o.userData.propDisc) discs.push(o); });
+      this.thrusters.set(v.inst.uid, {
+        view: v, def: d, rb: g.rb, local: c.sub(new THREE.Vector3(t.x, t.y, t.z)), axisL: new THREE.Vector3(...d.axis).transformDirection(obj.matrixWorld).normalize(),
+        throttle: 0, volts: 0, phase: 1, omega: 0, angle: 0, blades, discs, thrust: 0, torque: 0, power: 0,
+      });
+      // (a flying thing meets the air: it doesn't keep speeding up or spinning forever)
+      if (!g.fixed) {
+        g.rb.setLinearDamping(Math.max(g.rb.linearDamping(), 0.25));
+        g.rb.setAngularDamping(Math.max(g.rb.angularDamping(), 0.6));
+      }
+    }
 
     // tank tracks: their links go round as their sprocket turns (drawn in sync)
     for (const v of views)
@@ -663,6 +699,7 @@ export class Sim {
     }
     if (this.wireRopes.length) this.pullWires();
     if (this.mech.items.length) this.mech.before(STEP);
+    for (const t of this.thrusters.values()) stepThruster(t, STEP);
     this.world.step();
     if (this.mech.items.length) this.mech.after(STEP);
     this.time += STEP;
@@ -720,6 +757,7 @@ export class Sim {
   /** Move every body's drawing to where its rigid group is now. */
   sync() {
     for (const t of this.tracks) placeTrackLinks(t.data, t.act.total);
+    for (const t of this.thrusters.values()) drawThruster(t);
     const p = new THREE.Vector3(), q = new THREE.Quaternion();
     for (const g of this.groups) {
       const t = g.rb.translation(), r = g.rb.rotation();

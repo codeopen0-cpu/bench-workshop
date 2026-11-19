@@ -2,7 +2,7 @@
 // delay, Servo, Wire, Serial...) and talks to the simulation through shared memory (layout.ts).
 // Time is the SIMULATION's time: delay(1000) waits one simulated second, and pausing the simulation
 // pauses the program.
-import { CTL, EVENTS, IN_EVENTS, MODE, PINS, REQ, SPI_SNAP, Shared, protoCode, ringRead, ringWrite } from './layout';
+import { CTL, ESPNOW_PIN, EVENTS, IN_EVENTS, MODE, PINS, REQ, SPI_SNAP, Shared, protoCode, ringRead, ringWrite } from './layout';
 
 interface Start {
   type: 'start';
@@ -97,14 +97,18 @@ function run(init: Start) {
       inIsr = false;
     }
   };
+  /** things the radio delivers while the program waits (ESP-NOW's receive callback) */
+  let whileWaiting = () => {};
   const waitUntil = (ms: number) => {
     if (now() - lastFlush > 30) flush();
     timed();
+    whileWaiting();
     while (now() < ms) {
       const s = Atomics.load(ctl, CTL.STEP);
       if (now() >= ms) break;
       Atomics.wait(ctl, CTL.STEP, s, 250);
       timed();
+      whileWaiting();
     }
   };
   const request = (type: number, a0 = 0, a1 = 0, a2 = 0, data?: number[]) => {
@@ -138,6 +142,8 @@ function run(init: Start) {
 
   // ------------------------------------------------------------------------------- the Arduino API
   const C = init.constants;
+  /** this board's own MAC address (each board its own: ESP-NOW finds boards by it) */
+  const MAC = (() => { const m = (Number(C.__MAC) || 0xb34c10) >>> 0; return [0x24, 0x6f, 0x28, (m >> 16) & 255, (m >> 8) & 255, m & 255]; })();
   let pwmMax = 255, pwmHz = 1000;
   let adcBits = init.adcBits ?? 12;
   const api: Record<string, any> = {
@@ -262,6 +268,7 @@ function run(init: Start) {
   delete api.true;
 
   const fmt = (x: any, f?: number) => {
+    if (typeof x === 'boolean') return x ? '1' : '0'; // (Serial.print(true) prints 1, as on a board)
     if (typeof x === 'number' && f !== undefined) return f === 16 ? x.toString(16).toUpperCase() : f === 2 ? x.toString(2) : f === 8 ? x.toString(8) : f === 10 ? String(Math.trunc(x)) : x.toFixed(f);
     if (typeof x === 'number' && !Number.isInteger(x)) return x.toFixed(2); // Arduino prints floats with 2 decimals
     return typeof x === 'object' && x && x.toString === Object.prototype.toString ? JSON.stringify(x) : String(x); // (an IPAddress prints as 192.168.1.100)
@@ -421,7 +428,10 @@ function run(init: Start) {
     softAPIP: () => unpackIp(Atomics.load(ctl, CTL.WIFI_IP)),
     SSID: () => wifiSsid,
     RSSI: () => -52,
-    macAddress: () => '24:6F:28:B3:4C:10',
+    macAddress: (out?: any) => {
+      if (out && typeof out === 'object') { MAC.forEach((b, i) => (out[i] = b)); return out; }
+      return MAC.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(':');
+    },
     getHostname: () => 'esp32',
   };
   const MDNS = { begin: () => true, addService: () => true, end: () => {} };
@@ -588,6 +598,114 @@ function run(init: Start) {
     WIFI_OFF: 0, WIFI_STA: 1, WIFI_AP: 2, WIFI_AP_STA: 3,
     HTTP_ANY: 255, HTTP_DELETE: 0, HTTP_GET: 1, HTTP_HEAD: 2, HTTP_POST: 3, HTTP_PUT: 4, HTTP_PATCH: 28,
   });
+
+  // ------------------------------------------------------------------------------- ESP-NOW, Bluetooth
+  // ESP-NOW: short messages straight from one ESP32 to another (no router), by MAC address. What's
+  // sent is a copy of what the sketch hands over (bytes, a text, or a struct's fields), so the usual
+  // memcpy(&myData, incomingData, sizeof(myData)) on the other board fills its struct.
+  const BROADCAST = 'ff:ff:ff:ff:ff:ff';
+  const macKey = (m: any) => Array.from({ length: 6 }, (_, i) => Number(m?.[i] ?? 0) & 255).map((b) => b.toString(16).padStart(2, '0')).join(':');
+  const macArray = (k: string) => k.split(':').map((h) => parseInt(h, 16));
+  const espnow = { inited: false, peers: new Set<string>(), sendCb: null as null | ((mac: any, status: number) => void), recvCb: null as null | ((info: any, data: any, len: number) => void), inPump: false };
+  class esp_now_peer_info_t { peer_addr = [0, 0, 0, 0, 0, 0]; channel = 0; encrypt = false; ifidx = 0; lmk = new Array(16).fill(0); priv = null; }
+  const espnowPump = () => {
+    if (espnow.inPump || !espnow.recvCb) return;
+    espnow.inPump = true;
+    try {
+      pumpIn();
+      const k = `${ESPNOW_PIN}:${protoCode('data')}`;
+      const q = inbox.get(k) ?? [];
+      inbox.delete(k);
+      for (const m of q) {
+        let msg: any;
+        try { msg = JSON.parse(dec.decode(new Uint8Array(m.data))); } catch { continue; }
+        const data: any = (msg.bytes ?? []).slice();
+        while (data.length < msg.len) data.push(0);
+        data.__obj = msg.obj;
+        // (core 3 hands an info struct, core 2 the sender's MAC: this is both)
+        const info: any = macArray(msg.from);
+        info.src_addr = info;
+        info.des_addr = MAC.slice();
+        info.rx_ctrl = { rssi: -42 };
+        espnow.recvCb(info, data, msg.len);
+      }
+    } finally {
+      espnow.inPump = false;
+    }
+  };
+  whileWaiting = espnowPump;
+  const ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_ESPNOW_NOT_INIT = 0x3065, ESP_ERR_ESPNOW_ARG = 0x3066, ESP_ERR_ESPNOW_NOT_FOUND = 0x3069, ESP_ERR_ESPNOW_EXIST = 0x306a;
+  Object.assign(api, {
+    esp_now_peer_info_t, ESP_OK, ESP_FAIL, ESP_ERR_ESPNOW_NOT_INIT, ESP_ERR_ESPNOW_ARG, ESP_ERR_ESPNOW_NOT_FOUND, ESP_ERR_ESPNOW_EXIST,
+    ESP_NOW_SEND_SUCCESS: 0, ESP_NOW_SEND_FAIL: 1, ESP_NOW_ETH_ALEN: 6, ESP_NOW_MAX_DATA_LEN: 250, WIFI_IF_STA: 0, WIFI_IF_AP: 1, ESP_IF_WIFI_STA: 0,
+    esp_now_init() {
+      if (!init.wifi) throw new Error('esp_now_init(): this board has no Wi-Fi radio');
+      espnow.inited = true;
+      return ESP_OK;
+    },
+    esp_now_deinit() { espnow.inited = false; return ESP_OK; },
+    esp_now_register_send_cb(fn: any) { espnow.sendCb = typeof fn === 'function' ? fn : null; return ESP_OK; },
+    esp_now_register_recv_cb(fn: any) { espnow.recvCb = typeof fn === 'function' ? fn : null; return ESP_OK; },
+    esp_now_add_peer(p: any) {
+      const peer = p instanceof Ref ? p.value : p;
+      const k = macKey(peer?.peer_addr);
+      if (espnow.peers.has(k)) return ESP_ERR_ESPNOW_EXIST;
+      espnow.peers.add(k);
+      return ESP_OK;
+    },
+    esp_now_del_peer(mac: any) { return espnow.peers.delete(macKey(mac)) ? ESP_OK : ESP_ERR_ESPNOW_NOT_FOUND; },
+    esp_now_is_peer_exist(mac: any) { return espnow.peers.has(macKey(mac)); },
+    esp_now_send(mac: any, data: any, len: number) {
+      if (!espnow.inited) return ESP_ERR_ESPNOW_NOT_INIT;
+      const targets = mac ? [macKey(mac)] : [...espnow.peers];
+      if (mac && targets[0] !== BROADCAST && !espnow.peers.has(targets[0])) {
+        warnOnce('espnowpeer', `esp_now_send to ${targets[0]}: add it with esp_now_add_peer() first`);
+        return ESP_ERR_ESPNOW_NOT_FOUND;
+      }
+      const v = data instanceof Ref ? data.value : data;
+      const n = Math.max(0, Math.min(250, Number(len) || 0));
+      const bytes = Array.isArray(v) || v instanceof Uint8Array ? Array.from(v as ArrayLike<number>).slice(0, n).map((x) => Number(x) & 255)
+        : typeof v === 'string' ? Array.from(v).slice(0, n).map((c) => c.charCodeAt(0) & 255) : typeof v === 'number' ? [v & 255] : [];
+      const obj = v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Uint8Array) ? JSON.parse(JSON.stringify(v)) : undefined;
+      for (const to of targets) {
+        const enc = new TextEncoder().encode(JSON.stringify({ to, from: macKey(MAC), len: n, bytes, obj }));
+        if (enc.length > 512) { warnOnce('espnowbig', 'esp_now_send: that message is too big (at most 250 bytes)'); return ESP_ERR_ESPNOW_ARG; }
+        const got = request(REQ.ESPNOW, enc.length, 0, 0, Array.from(enc)).status;
+        espnow.sendCb?.(macArray(to), to === BROADCAST || got > 0 ? 0 : 1);
+      }
+      return ESP_OK;
+    },
+  });
+  // BluetoothSerial (an ESP32's classic Bluetooth serial): what it prints shows in the serial monitor
+  // marked [BT], and it reads what you type there, as a phone's Bluetooth terminal would send it.
+  class BluetoothSerial {
+    private started = false;
+    private name = 'ESP32';
+    private fresh = true;
+    begin(name: any = 'ESP32') { this.name = String(name); this.started = true; Serial.println(`[BT] "${this.name}" is ready: a phone can pair with it`); return true; }
+    end() { this.started = false; }
+    private out(text: string) {
+      if (!this.started) return;
+      let s = '';
+      for (const ch of text) { if (this.fresh) { s += '[BT] '; this.fresh = false; } s += ch; if (ch === '\n') this.fresh = true; }
+      Serial.print(s);
+    }
+    print(x: any = '', f?: number) { this.out(fmt(x, f)); return 1; }
+    println(x: any = '', f?: number) { this.out(fmt(x, f) + '\n'); return 1; }
+    printf(f: string, ...a: any[]) { this.out(sprintf(f, ...a)); }
+    write(b: any) { this.out(typeof b === 'number' ? String.fromCharCode(b) : String(b)); return 1; }
+    available() { return this.started ? Serial.available() : 0; }
+    read() { return this.started ? Serial.read() : -1; }
+    readStringUntil(end: string) { return Serial.readStringUntil(end); }
+    readString() { let s = ''; while (Serial.available()) s += String.fromCharCode(Serial.read()); return s; }
+    hasClient() { return this.started; }
+    connected() { return this.started; }
+    flush() {}
+    register_callback() {}
+    enableSSP() {}
+    setPin() { return true; }
+  }
+  Object.assign(api, { BluetoothSerial });
 
   // ------------------------------------------------------------------------------- messages on wires
   // Faster than pin changes: a serial port's bytes, an LED strip's pixels, a sensor's answer. They
@@ -872,7 +990,17 @@ function run(init: Start) {
     __struct: (o: any, fields: string[], vals: any[]) => { vals.forEach((v, i) => { if (fields[i] !== undefined) o[fields[i]] = v; }); return o; },
     __strReplace: (str: any, a: any, b: any) => String(str).split(String(a)).join(String(b)),
     memset: (arr: any, v: number, n?: number) => { if (arr && typeof arr.fill === 'function') arr.fill(v, 0, n === undefined ? undefined : Math.min(arr.length, n)); return arr; },
-    memcpy: (dst: any, src: any, n: number) => { for (let i = 0; i < n && i < src.length; i++) dst[i] = src[i]; return dst; },
+    memcpy: (dst: any, src: any, n: number) => {
+      // (a struct that came by radio: its fields, as the sender had them)
+      if (src && src.__obj !== undefined) {
+        const v = JSON.parse(JSON.stringify(src.__obj));
+        if (dst instanceof Ref) dst.value = v;
+        else if (dst && typeof dst === 'object' && v && typeof v === 'object') Object.assign(dst, v);
+        return dst;
+      }
+      for (let i = 0; i < n && i < src.length; i++) dst[i] = src[i];
+      return dst;
+    },
     strlen: (x: any) => String(x ?? '').replace(/\0[\s\S]*$/, '').length,
     strcmp: (a: any, b: any) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0),
     sqrtf: Math.sqrt, sinf: Math.sin, cosf: Math.cos, tanf: Math.tan, asinf: Math.asin, acosf: Math.acos, atanf: Math.atan, atan2f: Math.atan2,
@@ -987,6 +1115,7 @@ function run(init: Start) {
     for (;;) {
       if (!loop) { waitUntil(now() + 1000); continue; }
       loop();
+      whileWaiting();
       if (++n % 64 === 0 && now() - lastFlush > 30) flush();
     }
   } catch (e) {

@@ -109,11 +109,29 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   // comments out (keeping their lines): braces or code in them must not count
   s = s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, '');
   s = preprocess(s, boardDefines);
+  // C's many-word integer types as one word each ("long unsigned int rxId;", "long long t;",
+  // "short int s;", "signed char c;"): the rules below know the one-word names
+  s = s
+    .replace(/\bunsigned\s+long\s+long(?:\s+int)?\b/g, 'uint64_t')
+    .replace(/\b(?:signed\s+)?long\s+long(?:\s+int)?\b/g, 'int64_t')
+    .replace(/\blong\s+unsigned(?:\s+int)?\b|\bunsigned\s+long\s+int\b/g, 'unsigned long')
+    .replace(/\bunsigned\s+short(?:\s+int)?\b|\bshort\s+unsigned(?:\s+int)?\b/g, 'uint16_t')
+    .replace(/\b(?:signed\s+)?short\s+int\b|\bsigned\s+short\b/g, 'short')
+    .replace(/\b(?:signed\s+)?long\s+int\b|\bsigned\s+long\b/g, 'long')
+    .replace(/\bsigned\s+char\b/g, 'int8_t')
+    .replace(/\bsigned\s+int\b/g, 'int')
+    // (the ESP32's own names for plain numbers: esp_err_t result = esp_now_send(...);)
+    .replace(/\b(?:esp_err_t|esp_now_send_status_t|wl_status_t|wifi_mode_t|wifi_interface_t|gpio_num_t)\b(?=\s+\w)/g, 'int')
+    // pointer casts: "(uint8_t *) &myData", "(const char*)buf", "(byte *) data" (in JS the thing itself)
+    .replace(/\(\s*(?:const\s+)?(?:unsigned\s+)?[A-Za-z_]\w*\s*\*+\s*\)\s*(?=[&\w("'])/g, '');
   // structs: a class whose fields start at zero ("struct Move { float from[5]; uint32_t t0; } mv = {};")
-  s = s.replace(/\b(?:typedef\s+)?struct\s+(\w*)\s*\{([^{}]*)\}\s*([^;]*);/g, (m, name: string, body: string, after: string) => {
+  s = s.replace(/\b(typedef\s+)?struct\s+(\w*)\s*\{([^{}]*)\}\s*([^;]*);/g, (m, td: string | undefined, name: string, body: string, after: string) => {
     const lines = (m.match(/\n/g) ?? []).length;
     let vars = after.trim();
-    if (!name) { name = vars; vars = ''; } // typedef struct { ... } Name;
+    let aliases: string[] = [];
+    if (!name) { name = vars.split(',')[0].trim(); vars = ''; } // typedef struct { ... } Name;
+    // "typedef struct name { ... } alias;": the names after it are other names for the type, not variables
+    if (td) { aliases = vars.split(',').map((x) => x.replace(/\*/g, '').trim()).filter((x) => /^\w+$/.test(x) && x !== name); vars = ''; }
     const fields: string[] = [], init: string[] = [];
     for (const f of body.split(';').map((x) => x.trim()).filter(Boolean)) {
       const fm = new RegExp(`^(?:(?:const|volatile|unsigned|signed)\\s+)*(\\w+)\\s*\\*?\\s+(.+)$`).exec(f);
@@ -122,20 +140,28 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
       const zero = t === 'String' ? '""' : t === 'bool' || t === 'boolean' ? 'false' : /^[A-Z]/.test(t) && classes.includes(t) ? `new ${t}()` : '0';
       for (const decl of fm[2].split(',')) {
         const a = /^\s*(\w+)\s*\[\s*([^\]]+?)\s*\]/.exec(decl), v = /^\s*(\w+)\s*=\s*(.+)$/.exec(decl);
-        if (a) { fields.push(a[1]); init.push(`this.${a[1]} = new Array(${a[2]}).fill(${zero});`); }
+        // (a char array is a text: strcpy() into it, print it)
+        if (a && t === 'char') { fields.push(a[1]); init.push(`this.${a[1]} = "";`); }
+        else if (a) { fields.push(a[1]); init.push(`this.${a[1]} = new Array(${a[2]}).fill(${zero});`); }
         else if (v) { fields.push(v[1]); init.push(`this.${v[1]} = ${v[2]};`); }
         else if (decl.trim()) { fields.push(decl.trim()); init.push(`this.${decl.trim()} = ${zero};`); }
       }
     }
-    classes.push(name);
+    classes.push(name, ...aliases);
+    const alias = aliases.map((x) => `const ${x} = ${name};`).join(' ');
     const decls = vars ? vars.split(/,(?![^{]*\})/).map((d) => {
       const dm = /^\s*(\w+)\s*(?:=\s*\{([^}]*)\})?\s*$/.exec(d);
       if (!dm) return '';
       const vals = (dm[2] ?? '').trim();
       return vals ? `let ${dm[1]} = __struct(new ${name}(), ${JSON.stringify(fields)}, [${vals}]);` : `let ${dm[1]} = new ${name}();`;
     }).join(' ') : '';
-    return `class ${name} { constructor() { ${init.join(' ')} } } ${decls}` + '\n'.repeat(lines);
+    return `class ${name} { constructor() { ${init.join(' ')} } } ${alias} ${decls}` + '\n'.repeat(lines);
   });
+  // C's string copies into char arrays (texts here): strcpy(dst, src) / strncpy(dst, src, n) / strcat
+  s = s
+    .replace(/\bstrcpy\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($2);')
+    .replace(/\bstrncpy\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^,;]+?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($2).slice(0, $3);')
+    .replace(/\bstrcat\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($1) + String($2);');
   // "using namespace ControlTableItem;" (the names are all there anyway)
   s = s.replace(/^\s*using\s+namespace\s+[\w:]+\s*;/gm, '');
   // ISR attributes (ESP32 / ESP8266): "void IRAM_ATTR onPulse() {"
