@@ -46,13 +46,13 @@ async function listen() {
 }
 
 /** Open (or reuse) the board's address on this PC. */
-export async function openBoardServer(board: string, handler: Handler): Promise<{ port: number; url: string }> {
+export async function openBoardServer(board: string, handler: Handler, fixedPort?: number): Promise<{ port: number; url: string }> {
   await listen();
   handlers.set(board, handler);
   let port: number;
   if (inTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    port = await invoke<number>('http_open', { board });
+    port = await invoke<number>('http_open', { board, port: fixedPort ?? null });
   } else if (import.meta.hot) {
     const hot = import.meta.hot;
     port = await new Promise<number>((resolve, reject) => {
@@ -60,11 +60,12 @@ export async function openBoardServer(board: string, handler: Handler): Promise<
       const got = (m: { board: string; port: number }) => {
         if (m.board !== board) return;
         clearTimeout(t);
+        if ((m as any).error) return reject(new Error((m as any).error));
         hot.off?.('bench:http-opened', got);
         resolve(m.port);
       };
       hot.on('bench:http-opened', got);
-      hot.send('bench:http-open', { board });
+      hot.send('bench:http-open', { board, port: fixedPort });
     });
   } else throw new Error('board web servers need the desktop app (or the dev server)');
   console.info(`[wifi] ${board}: web server at http://127.0.0.1:${port}/`);

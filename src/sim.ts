@@ -88,6 +88,8 @@ export class Sim {
   private tagged = new Map<string, RAPIER_NS.Collider[]>();
   /** every body's colliders, by part uid / body name */
   private bodyColliders = new Map<string, RAPIER_NS.Collider[]>();
+  /** which part each collider belongs to (by collider handle): what a thermal camera's ray hit */
+  private colliderOwner = new Map<number, string>();
   /** gears, belts, tank tracks, roller wheels */
   mech!: Mechanics;
   private tracks: { data: TrackLook; act: Actuator }[] = [];
@@ -209,6 +211,7 @@ export class Sim {
           if (c.frictionMin) cd.setFrictionCombineRule(R.CoefficientCombineRule.Min);
           const col = this.world.createCollider(cd, rb);
           const bk = keyOf(m.view.inst.uid, m.body);
+          this.colliderOwner.set(col.handle, m.view.inst.uid);
           if (!this.bodyColliders.has(bk)) this.bodyColliders.set(bk, []);
           this.bodyColliders.get(bk)!.push(col);
           if (c.tag) {
@@ -457,9 +460,23 @@ export class Sim {
     return this.byKey.get(keyOf(uid, body))?.rb;
   }
   /** Distance (cm) to the first thing along a ray, ignoring `exclude`; null = nothing within max. */
-  raycast(origin: THREE.Vector3, dir: THREE.Vector3, max: number, exclude?: RAPIER_NS.RigidBody) {
+  /** like raycast, and which part it hit (its uid; null: the bench floor or nothing) */
+  raycastHit(origin: THREE.Vector3, dir: THREE.Vector3, max: number, exclude?: RAPIER_NS.RigidBody, uid?: string): { d: number; uid: string | null } | null {
     const ray = new this.R.Ray({ x: origin.x, y: origin.y, z: origin.z }, { x: dir.x, y: dir.y, z: dir.z });
-    const hit = this.world.castRay(ray, max, true, undefined, undefined, undefined, exclude);
+    const f = this.castFilter(exclude, uid);
+    const hit = this.world.castRay(ray, max, true, undefined, undefined, undefined, f.rb, f.pred);
+    return hit ? { d: hit.timeOfImpact, uid: this.colliderOwner.get(hit.collider.handle) ?? null } : null;
+  }
+  /** what a sensor's ray passes through: its own rigid body (it and what it's glued to). But everything
+   *  pinned is one fixed body (with the walls and courses): a pinned sensor passes only its own part. */
+  private castFilter(exclude?: RAPIER_NS.RigidBody, uid?: string) {
+    if (exclude && uid && exclude.isFixed()) return { rb: undefined, pred: (col: RAPIER_NS.Collider) => this.colliderOwner.get(col.handle) !== uid };
+    return { rb: exclude, pred: undefined };
+  }
+  raycast(origin: THREE.Vector3, dir: THREE.Vector3, max: number, exclude?: RAPIER_NS.RigidBody, uid?: string) {
+    const ray = new this.R.Ray({ x: origin.x, y: origin.y, z: origin.z }, { x: dir.x, y: dir.y, z: dir.z });
+    const f = this.castFilter(exclude, uid);
+    const hit = this.world.castRay(ray, max, true, undefined, undefined, undefined, f.rb, f.pred);
     return hit ? hit.timeOfImpact : null;
   }
 

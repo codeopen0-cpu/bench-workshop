@@ -241,3 +241,18 @@ h3 { margin: 4px 0 8px; font-size: 12px; text-transform: uppercase; letter-spaci
 .sheet-note { color: var(--dim); font-size: 12px; margin-top: 10px; }
 .sheet-img { display: block; margin: 0 auto; max-width: 100%; max-height: 46vh; border: 1px solid var(--line); border-radius: 6px; }
 .sheet-nets { font-size: 13px; line-height: 1.6; padding-left: 22px; }
+
+/* putting a program on a real board */
+.rb-window { width: min(760px, 94vw); }
+.rb-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.rb-row { display: flex; align-items: center; gap: 10px; }
+.rb-row > span { width: 90px; color: var(--dim); flex: none; }
+.rb-select { flex: 1; min-width: 0; }
+.rb-other { width: 220px; }
+.rb-note { font-size: 13px; min-height: 1.4em; }
+.rb-note .dim, .rb-out .dim { color: var(--dim); }
+.rb-out { height: 260px; overflow: auto; margin: 0; padding: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+.rb-out .err { color: #e6a35a; }
+.rb-out .bad { color: #ff6b6b; }
+.rb-out .warn { color: #f0c24b; }
+.rb-out .ok { color: #5fd38a; font-weight: 600; }

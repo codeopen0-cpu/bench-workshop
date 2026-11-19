@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server as HttpServer } from 'node:http';
-import { join, normalize } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, delimiter, join, normalize } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
 // The library list (registry/) while developing: the app reads /registry/index.json. Not part of the
@@ -30,7 +32,7 @@ const boardWeb = (): Plugin => ({
     const servers = new Map<string, { port: number; srv: HttpServer }>();
     const waiting = new Map<number, (a: { status: number; contentType: string; headers: Record<string, string>; body: string }) => void>();
     let next = 0;
-    server.ws.on('bench:http-open', ({ board }: { board: string }, client) => {
+    server.ws.on('bench:http-open', ({ board, port: want }: { board: string; port?: number }, client) => {
       const have = servers.get(board);
       if (have) return client.send('bench:http-opened', { board, port: have.port });
       const srv = createServer((req, res) => {
@@ -52,13 +54,55 @@ const boardWeb = (): Plugin => ({
           server.ws.send('bench:http-req', { id, board, method: req.method, url: req.url, headers: req.headers, body });
         });
       });
-      srv.listen(0, '127.0.0.1', () => {
+      srv.on('error', (e) => client.send('bench:http-opened', { board, port: 0, error: String(e) }));
+      srv.listen(want ?? 0, '127.0.0.1', () => {
         const port = (srv.address() as { port: number }).port;
         servers.set(board, { port, srv });
         client.send('bench:http-opened', { board, port });
       });
     });
     server.ws.on('bench:http-res', (a: { id: number; status: number; contentType: string; headers: Record<string, string>; body: string }) => waiting.get(a.id)?.(a));
+    // real boards (src/ui/realboard.ts): arduino-cli, as the desktop app runs it (src-tauri/src/lib.rs)
+    server.ws.on('bench:ardu', async (m: { id: string; op: string; name?: string; source?: string; exe?: string; args?: string[]; job?: string }, client) => {
+      const done = (result?: unknown, error?: string) => client.send('bench:ardu-done', { id: m.id, result, error });
+      try {
+        if (m.op === 'find') {
+          const cands = [
+            ...(process.env.PATH ?? '').split(delimiter).map((d) => join(d, process.platform === 'win32' ? 'arduino-cli.exe' : 'arduino-cli')),
+            join(process.env.ProgramFiles ?? 'C:/Program Files', 'Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe'),
+            join(process.env.LOCALAPPDATA ?? '', 'Programs/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe'),
+          ];
+          return done(cands.find((c) => existsSync(c)) ?? null);
+        }
+        if (m.op === 'sketch') {
+          const name = (m.name ?? 'sketch').replace(/[^A-Za-z0-9_]/g, '_') || 'sketch';
+          const dir = join(tmpdir(), 'bench-workshop-sketches', name);
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(join(dir, `${name}.ino`), m.source ?? '');
+          return done(dir);
+        }
+        if (m.op === 'run') {
+          if (!/^arduino-cli(\.exe)?$/i.test(basename(m.exe ?? ''))) return done(undefined, 'not arduino-cli');
+          const child = spawn(m.exe!, m.args ?? [], { windowsHide: true });
+          const pipe = (s: NodeJS.ReadableStream, err: boolean) => {
+            let buf = '';
+            s.on('data', (c) => {
+              buf += c;
+              const lines = buf.split(/\r?\n/);
+              buf = lines.pop()!;
+              for (const line of lines) client.send('bench:ardu-line', { job: m.job, line, err });
+            });
+            s.on('end', () => buf && client.send('bench:ardu-line', { job: m.job, line: buf, err }));
+          };
+          pipe(child.stdout, false);
+          pipe(child.stderr, true);
+          child.on('error', (e) => done(undefined, String(e)));
+          child.on('close', (code) => done(code ?? -1));
+        }
+      } catch (e) {
+        done(undefined, String(e));
+      }
+    });
     server.ws.on('bench:http-close', ({ board }: { board: string }) => {
       servers.get(board)?.srv.close();
       servers.delete(board);

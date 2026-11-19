@@ -10,6 +10,9 @@ const app = new App(RAPIER);
 // handy for poking at it from the developer console (and for automated checks)
 (window as any).bench = app;
 
+// the control API was on last time: on again
+try { if (localStorage.getItem('bench.api') === '1') void app.toggleApi(); } catch { /* no storage */ }
+
 // a newer version on GitHub? (desktop app only; a few seconds in, so start-up isn't slowed)
 setTimeout(() => import('./update').then((u) => u.checkForUpdate((m, l) => app.log(m, l))), 4000);
 

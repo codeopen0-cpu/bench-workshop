@@ -298,7 +298,7 @@ export function libraryDevice(v: PartView, lib: Library, part: LibPart, hooks: D
         tmpP.setFromMatrixPosition(rg.obj.matrixWorld);
         rg.obj.getWorldQuaternion(tmpQ);
         tmpD.set(...(rg.def.look ?? [1, 0, 0])).normalize().applyQuaternion(tmpQ);
-        const d = c.sim.raycast(tmpP, tmpD, rg.def.max ?? 400, c.sim.rigidOf(uid, rg.body));
+        const d = c.sim.raycast(tmpP, tmpD, rg.def.max ?? 400, c.sim.rigidOf(uid, rg.body), uid);
         ranges[id] = d === null ? null : Math.round(d * 100) / 100;
       }
       // what else its code asked to know: how it moves, what touches it, light, sound
@@ -349,7 +349,7 @@ export function libraryDevice(v: PartView, lib: Library, part: LibPart, hooks: D
           for (let i = 0; i < k; i++) {
             const a = (i / k) * Math.PI * 2, t = Math.tan(half * r);
             tmpD.copy(look).addScaledVector(u, Math.cos(a) * t).addScaledVector(w2, Math.sin(a) * t).normalize();
-            const d = c.sim.raycast(tmpP, tmpD, 40, exclude);
+            const d = c.sim.raycast(tmpP, tmpD, 40, exclude, uid);
             open += d === null ? 1 : Math.min(1, 0.08 + d / 60); // (a near cover blocks it; light still gets round a far one)
             n++;
           }

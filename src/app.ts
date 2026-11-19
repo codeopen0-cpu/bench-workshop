@@ -14,6 +14,7 @@ import { applyUiScale, autoUiScale, setUiScale, uiScaleSetting, watchUiScale } f
 import { PadInput } from './ui/gamepad';
 import { Instruments } from './ui/instruments';
 import { openSheets } from './ui/sheets';
+import { ControlApi } from './net/api';
 import { WebView } from './ui/webview';
 import { CheckWindow } from './ui/checkwin';
 import { Tutorial } from './ui/tutorial';
@@ -53,6 +54,63 @@ export class App {
   belting: string | null = null; // picking the pulley the selected one gets a belt to
   /** a game pad / the keyboard playing a PS2 controller library's receiver */
   private pad = new PadInput();
+  /** the control API: the bench driven by programs on this PC (toolbar: API) */
+  api = new ControlApi({
+    mode: () => this.mode,
+    time: () => this.sim?.time ?? 0,
+    project: () => this.project,
+    run: () => this.run(),
+    stop: () => this.stop(),
+    pause: () => this.pause(),
+    advance: (s) => this.advance(s),
+    bodies: (uid) => {
+      const out: { name: string; rb: any }[] = [];
+      for (const [k, g] of ((this.sim as any)?.byKey ?? new Map()) as Map<string, any>) if (k.startsWith(uid + '/')) out.push({ name: k.slice(uid.length + 1), rb: (g as any).rb });
+      return out;
+    },
+    pose: (uid) => {
+      const v = this.views.get(uid);
+      if (!v) return null;
+      v.root.updateWorldMatrix(true, false);
+      const p = new THREE.Vector3(), q = new THREE.Quaternion();
+      v.root.matrixWorld.decompose(p, q, new THREE.Vector3());
+      const r3 = (x: number) => Math.round(x * 1000) / 1000;
+      return { pos: [r3(p.x), r3(p.y), r3(p.z)], rot: [r3(q.x), r3(q.y), r3(q.z), r3(q.w)] };
+    },
+    device: (uid) => this.circuit?.devices.find((d) => d.view.inst.uid === uid) as any,
+    pinVolts: (uid) => {
+      const v = this.views.get(uid);
+      const out: Record<string, number | null> = {};
+      for (const pin of v?.build.pins ?? []) out[pin.id] = this.circuit ? Math.round(this.circuit.avg(uid, pin.id) * 1000) / 1000 : null;
+      return out;
+    },
+    serialText: (uid) => this.dock.serialText(uid),
+    load: (json) => {
+      const { project, problems } = validate(json);
+      if (project) { this.stop(); this.load(project, null); }
+      return problems;
+    },
+    setProgram: (uid, source, lang) => {
+      this.project.programs[uid] = { lang: lang as any, source };
+      this.dirty = true;
+      this.dock.projectChanged();
+    },
+    isBoard: (uid) => !!PART_BY_ID.get(this.instOf(uid)?.type ?? '')?.programmable,
+    log: (m, l) => this.log(m, l),
+  });
+  async toggleApi() {
+    try {
+      if (this.api.on) await this.api.stopApi();
+      else {
+        const url = await this.api.start();
+        this.hint(`Control API: ${url}  (GET / there lists what it does; programs on this PC only)`);
+      }
+      try { localStorage.setItem('bench.api', this.api.on ? '1' : '0'); } catch { /* not kept */ }
+    } catch (e: any) {
+      this.log(`control API: could not open port 7420 (${e?.message ?? e}): is another copy using it?`, 'bad');
+    }
+    this.refreshAll();
+  }
   /** the ruler and the multimeter (made when first used) */
   private _ins: Instruments | null = null;
   get ins() {
@@ -225,6 +283,15 @@ export class App {
       canLoadFirmware: (uid) => PART_BY_ID.get(this.instOf(uid)?.type ?? '')?.programmable === 'rp2040',
       loadFirmware: (uid) => this.loadFirmware(uid),
       sendSerial: (uid, text) => this.circuit?.devices.find((d) => d.view.inst.uid === uid)?.sendSerial?.(text),
+      realBoard: (uid) => {
+        const inst = this.instOf(uid);
+        const prog = this.project.programs[uid];
+        if (!inst) return;
+        void import('./ui/realboard').then((m) => m.openRealBoard({
+          board: { uid, type: inst.type, name: inst.name, source: prog?.source ?? '', lang: prog?.lang ?? 'arduino' },
+          log: (msg, l) => this.log(msg, l),
+        }));
+      },
     });
     this.stage.gizmo.addEventListener('mouseDown', () => {
       this.snapshot();
@@ -607,6 +674,7 @@ export class App {
       parent: null, pos: [0, 0, 0], rot: [0, 0, 0, 1],
     };
     const parent = pl.hit.ground ? null : { uid: pl.hit.object.userData.uid as string, body: pl.hit.object.userData.body as string };
+    if (pl.type.fixed && !parent) inst.pinned = true; // (a course put on the bench stays put)
     this.setWorld(inst, this.placingPose(pl.hit, pl.spin, true, pl.type, inst.params), parent);
     this.gridDots.visible = false;
     this.project.parts.push(inst);
@@ -632,7 +700,7 @@ export class App {
     if (!type) throw new Error(`no part type ${typeId}`);
     const inst: PartInst = {
       uid: newUid(), type: typeId, name: opts.name ?? uniqueName(this.project, type.name), params: { ...type.defaults, ...(opts.params ?? {}) },
-      parent: null, pos: [0, 0, 0], rot: [0, 0, 0, 1], pinned: opts.pinned,
+      parent: null, pos: [0, 0, 0], rot: [0, 0, 0, 1], pinned: opts.pinned ?? (type.fixed && !opts.onto ? true : undefined),
     };
     const hit = { point: new THREE.Vector3(...point), normal: new THREE.Vector3(...normal).normalize(), object: null as any, ground: false };
     this.setWorld(inst, this.placingPose(hit, opts.spin ?? 0, false, type, inst.params), opts.onto ?? null);
@@ -1721,6 +1789,7 @@ export class App {
       b('program', 'Program', 'Edit the selected board\'s program, and see its serial monitor', () => this.openProgram()),
       b('ruler', 'Ruler', 'Measure the distance between two points (M)', () => this.ins.setMode('ruler')),
       b('meter', 'Meter', 'A multimeter: click a pin for its volts, a second pin for the volts between them; live while running (V)', () => this.ins.setMode('meter')),
+      b('api', 'API', 'Control API: let your own programs (Python, scripts) drive the bench at http://127.0.0.1:7420/ (this PC only)', () => void this.toggleApi()),
       b('sheets', 'Parts list', 'What to buy (with rough prices) and a wiring sheet, to build it for real', () => openSheets({ project: () => this.project, views: () => this.views, typeOf: (id) => PART_BY_ID.get(id), stage: this.stage, log: (m, l) => this.log(m, l) })),
       b('check', 'Check', 'Check the wiring for mistakes (shorts, reversed or too-high supplies, missing power...) without running', () => this.checker.open()),
       el('div', { className: 'sep' }),
@@ -1821,6 +1890,7 @@ export class App {
     benchAudio.setPaused(m !== 'run');
     this.toolbarButtons.wire.classList.toggle('active', this.wiring);
     this.toolbarButtons.ruler?.classList.toggle('active', this._ins?.mode === 'ruler');
+    this.toolbarButtons.api?.classList.toggle('active', this.api.on);
     this.toolbarButtons.meter?.classList.toggle('active', this._ins?.mode === 'meter');
     this.toolbarButtons.program.disabled = !this.programmableSelected();
     for (const item of this.dom.catalog.querySelectorAll<HTMLElement>('.cat-item')) item.classList.toggle('placing', !!item.dataset.type && this.placing?.type.id === item.dataset.type);
@@ -2069,6 +2139,9 @@ export class App {
       'ESP32s talk to each other with ESP-NOW (esp_now.h, by MAC address), and BluetoothSerial shows in the serial monitor marked [BT]. A PS2 controller (library) is played with a game pad plugged into this PC, or the keyboard (arrows, 1-4, Q / E, Enter, I J K L). ' +
       'Flying: a Brushless motor + propeller on an ESC (servo signal from a board: 1000 us to arm, up to 2000 for full thrust); wired straight it turns clockwise, two phase wires swapped counter-clockwise, to suit its propeller. ' +
       'The move / turn arrows sit at the centre of the selected part (Grid menu: or its centre of mass, or its base). ' +
+      'API (toolbar): your own programs drive the bench at http://127.0.0.1:7420/ (run, step, positions, buttons, serial; GET / there lists it all; this PC only, never web pages). ' +
+      'Sensors: a Thermal camera (AMG8833, 8 x 8 temperatures; Adafruit_AMG88xx) sees Warm objects; a Lidar (RPLidar A1; the RPLidar library on a serial port) measures all the way round. ' +
+      'Courses (parts list): a ramp or hill, stairs, speed bumps, walls, an arena, rough ground, an obstacle field and line tracks to test a robot on; they are fixed in place on the bench. ' +
       'Ruler (M): click two points for the distance. Meter (V): a multimeter: click a pin (red probe), then another (black); it reads live while running. Parts list: what to buy with rough prices, and a wiring sheet to copy, save or print. ' +
       'Your own designs: My boards > Import 3D model (.stl) makes a part of it (its look, its weight, and a solid shape that keeps holes and hollows open). ' +
       'Grid (toolbar, G): parts snap to it when placed or moved; a part you put things on gets its own grid that fits it (odd sizes too), shown as blue dots. UI (toolbar): how big the buttons and text are; auto follows your display settings and screen. ' +

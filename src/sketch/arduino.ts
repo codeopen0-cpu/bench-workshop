@@ -121,7 +121,7 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
     .replace(/\bsigned\s+char\b/g, 'int8_t')
     .replace(/\bsigned\s+int\b/g, 'int')
     // (the ESP32's own names for plain numbers: esp_err_t result = esp_now_send(...);)
-    .replace(/\b(?:esp_err_t|esp_now_send_status_t|wl_status_t|wifi_mode_t|wifi_interface_t|gpio_num_t)\b(?=\s+\w)/g, 'int')
+    .replace(/\b(?:esp_err_t|esp_now_send_status_t|wl_status_t|wifi_mode_t|wifi_interface_t|gpio_num_t|u_result|_u8|_u16|_u32)\b(?=\s+\w)/g, 'int')
     // pointer casts: "(uint8_t *) &myData", "(const char*)buf", "(byte *) data" (in JS the thing itself)
     .replace(/\(\s*(?:const\s+)?(?:unsigned\s+)?[A-Za-z_]\w*\s*\*+\s*\)\s*(?=[&\w("'])/g, '');
   // structs: a class whose fields start at zero ("struct Move { float from[5]; uint32_t t0; } mv = {};")
@@ -209,6 +209,11 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   const CASTS: Record<string, string> = { int16_t: '__i16', int8_t: '__i8', uint8_t: '__u8', byte: '__u8', uint16_t: '__u16', 'unsigned short': '__u16', uint32_t: '__u32', 'unsigned long': '__u32', 'unsigned int': '__u32', int: 'Math.trunc', long: 'Math.trunc', short: '__i16', int32_t: 'Math.trunc' };
   s = s.replace(/\(\s*(int16_t|int8_t|uint8_t|byte|uint16_t|unsigned\s+short|uint32_t|unsigned\s+long|unsigned\s+int|int|long|short|int32_t)\s*\)\s*\(/g, (_m, t: string) => `${CASTS[t.replace(/\s+/, ' ')]}(`);
   s = s.replace(/\(\s*char\s*\)\s*([\w.]+(?:\([^()]*\))?(?:\[[^\]]*\])?)/g, '__char($1)');
+  // and on a plain operand: "(int)pixels[i]", "(byte)x", "(long)obj.read()" (a cast binds tightest)
+  s = s.replace(/\(\s*(int16_t|int8_t|uint8_t|byte|uint16_t|unsigned\s+short|uint32_t|unsigned\s+long|unsigned\s+int|int|long|short|int32_t)\s*\)\s*([A-Za-z_\d][\w.]*(?:\([^()]*\))?(?:\[[^\]]*\])*)/g,
+    (_m, t: string, x: string) => `${CASTS[t.replace(/\s+/, ' ')]}(${x})`);
+  // "(float)k / 2": a fraction (not whole-number division of an int)
+  s = s.replace(/\(\s*(?:float|double)\s*\)\s*([A-Za-z_\d][\w.]*(?:\([^()]*\))?(?:\[[^\]]*\])*)/g, '(+$1)');
   // whole-number division of int variables: C++ drops the fraction ("y / 8" with int y)
   for (const m of s.matchAll(new RegExp(`\\b(?:(?:const|static|volatile|unsigned|signed)\\s+)*${INT_T}\\s+(\\w+)\\s*(?=[=;,)])`, 'g'))) ints.add(m[1]);
   for (const m of s.matchAll(new RegExp(`\\b(?:float|double)\\s+(\\w+)\\s*(?=[=;,)\\[])`, 'g'))) ints.delete(m[1]);

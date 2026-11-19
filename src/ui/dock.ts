@@ -85,6 +85,8 @@ export interface DockHooks {
   canLoadFirmware(uid: string): boolean;
   loadFirmware(uid: string): void;
   sendSerial(uid: string, text: string): void;
+  /** put the program on a real board (arduino-cli) */
+  realBoard?(uid: string): void;
 }
 
 const h = (tag: string, props: Record<string, any> = {}, ...kids: (Node | string)[]) => {
@@ -128,6 +130,7 @@ export class Dock {
     };
     this.el = h('div', { className: 'dock' },
       h('div', { className: 'dock-head' }, this.title, this.lang, this.fwBtn, this.fwNote, h('span', { className: 'spacer' }),
+        h('button', { textContent: 'Upload to a real board...', title: 'Compile this program and upload it to a real board on USB (with arduino-cli, which comes with the Arduino IDE)', onclick: () => { if (this.uid) { this.flush(); hooks.realBoard?.(this.uid); } } }),
         h('button', { textContent: 'Clear serial', onclick: () => { if (this.uid) { this.serial.set(this.uid, ''); this.serialPre.textContent = ''; this.plots.delete(this.uid); this.drawPlot(); } } }),
         h('button', { textContent: 'Close', onclick: () => this.close() })),
       h('div', { className: 'dock-body' }, this.editorHost,

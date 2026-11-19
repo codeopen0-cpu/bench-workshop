@@ -1,6 +1,6 @@
 [package]
 name = "bench-workshop"
-version = "0.9.0"
+version = "0.11.0"
 description = "Bench Workshop: build, wire, program and test boards and machines in 3D"
 edition = "2021"
 license = "MIT"

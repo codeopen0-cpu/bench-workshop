@@ -381,4 +381,4 @@ export function unregisterParts(ids: string[]) {
     PART_BY_ID.delete(id);
   }
 }
-export const CATEGORIES = ['Structure', 'Motion', 'Power', 'Boards', 'Electronics', 'Modules', 'Sensors', 'My boards'];
+export const CATEGORIES = ['Structure', 'Motion', 'Power', 'Boards', 'Electronics', 'Modules', 'Sensors', 'Courses', 'My boards'];

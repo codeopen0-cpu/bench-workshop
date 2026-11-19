@@ -868,6 +868,152 @@ function run(init: Start) {
   }
   Object.assign(api, { Serial1, Serial2, Serial3, SoftwareSerial, HardwareSerial, SERIAL_8N1: 0x800001c, SERIAL_8E1: 0x800001e, linkSend, linkReceive });
 
+  // Adafruit_AMG88xx (the AMG8833 thermal camera): the library's calls, done the library's way, as
+  // I2C register reads and writes (so the chip on the bench answers them like the real one)
+  class Adafruit_AMG88xx {
+    private addr = 0x69;
+    private w(reg: number, v: number) { Wire.beginTransmission(this.addr); Wire.write(reg); Wire.write(v); return Wire.endTransmission(); }
+    private r(reg: number, n: number) {
+      Wire.beginTransmission(this.addr); Wire.write(reg); Wire.endTransmission();
+      Wire.requestFrom(this.addr, n);
+      const out: number[] = [];
+      while (Wire.available()) out.push(Wire.read());
+      return out;
+    }
+    begin(addr: number = 0x69) {
+      this.addr = addr;
+      if (this.w(0x00, 0x00) !== 0) return false; // normal mode (no answer: not there)
+      this.w(0x01, 0x3f); // initial reset
+      this.w(0x03, 0x00); // interrupts off
+      this.w(0x02, 0x00); // 10 frames a second
+      waitUntil(now() + 100);
+      return true;
+    }
+    readPixels(buf: number[], size = 64) {
+      const n = Math.min(64, size);
+      const raw = this.r(0x80, n * 2);
+      for (let i = 0; i < n; i++) {
+        let v = ((raw[i * 2 + 1] ?? 0) << 8) | (raw[i * 2] ?? 0);
+        if (v & 0x800) v -= 0x1000; // (12-bit, two's complement)
+        buf[i] = v * 0.25;
+      }
+    }
+    readPixelsRaw(buf: number[], size = 128) { this.r(0x80, Math.min(128, size)).forEach((b, i) => (buf[i] = b)); }
+    readThermistor() {
+      const raw = this.r(0x0e, 2);
+      const v = (((raw[1] ?? 0) & 0x07) << 8) | (raw[0] ?? 0);
+      return ((raw[1] ?? 0) & 0x08 ? -v : v) * 0.0625;
+    }
+    setMovingAverageMode(on: any) { this.w(0x07, on ? 0x20 : 0x00); }
+    disableInterrupt() { this.w(0x03, 0x00); }
+    enableInterrupt() { this.w(0x03, 0x01); }
+    setInterruptMode() {}
+    setInterruptLevels() {}
+    getInterrupt() {}
+    clearInterrupt() { this.w(0x05, 0x0e); }
+  }
+  Object.assign(api, { Adafruit_AMG88xx, AMG88xx_PIXEL_ARRAY_SIZE: 64, AMG88xx_ADDRESS: 0x69, AMG88xx_NORMAL_MODE: 0, AMG88xx_SLEEP_MODE: 0x10, AMG88xx_STAND_BY_60: 0x20, AMG88xx_STAND_BY_10: 0x21 });
+
+  // RPLidar (the RoboPeak / Slamtec Arduino library): it talks the lidar's own serial protocol
+  const RESULT_OK = 0, RESULT_FAIL_BIT = 0x80000000, RESULT_OPERATION_TIMEOUT = 0x80008002, RESULT_INVALID_DATA = 0x80008000;
+  class RPLidarMeasurement { distance = 0; angle = 0; quality = 0; startBit = false; }
+  class rplidar_response_device_info_t { model = 0; firmware_version = 0; hardware_version = 0; serialnum: number[] = []; }
+  class rplidar_response_device_health_t { status = 0; error_code = 0; }
+  class RPLidar {
+    private s: any = null;
+    private point = new RPLidarMeasurement();
+    begin(serial: any) {
+      this.s = serial;
+      this.s.end?.();
+      this.s.begin(115200);
+      return true;
+    }
+    end() { this.s?.end?.(); this.s = null; }
+    isOpen() { return !!this.s; }
+    getCurrentPoint() { return this.point; }
+    private send(cmd: number) { this.s.write([0xa5, cmd], 2); }
+    /** wait for n bytes (timeout ms): null if they didn't come */
+    private take(n: number, timeout: number) {
+      const out: number[] = [];
+      const end = now() + timeout;
+      while (out.length < n) {
+        if (this.s.available() > 0) { out.push(this.s.read()); continue; }
+        if (now() >= end) return null;
+        waitUntil(Math.min(end, now() + 1));
+      }
+      return out;
+    }
+    private header(type: number, timeout: number) {
+      const end = now() + timeout;
+      let prev = -1;
+      while (now() < end) {
+        const b = this.take(1, end - now());
+        if (!b) return false;
+        if (prev === 0xa5 && b[0] === 0x5a) {
+          const rest = this.take(5, end - now());
+          return !!rest && rest[4] === type;
+        }
+        prev = b[0];
+      }
+      return false;
+    }
+    startScan(force: any = false, timeout = 2000) {
+      if (!this.s) return RESULT_OPERATION_TIMEOUT;
+      this.stop();
+      while (this.s.available()) this.s.read(); // (what was left from before)
+      this.send(force ? 0x21 : 0x20);
+      return this.header(0x81, timeout) ? RESULT_OK : RESULT_OPERATION_TIMEOUT;
+    }
+    stop() { if (this.s) this.send(0x25); return RESULT_OK; }
+    reset() { if (this.s) this.send(0x40); return RESULT_OK; }
+    waitPoint(timeout = 500) {
+      if (!this.s) return RESULT_OPERATION_TIMEOUT;
+      const end = now() + timeout;
+      const node: number[] = [];
+      while (now() < end) {
+        const b = this.take(1, end - now());
+        if (!b) break;
+        const c = b[0];
+        // (the library's checks, byte by byte: S and not-S differ; the check bit is set)
+        if (node.length === 0) { const s = c & 1, ns = (c >> 1) & 1; if (s === ns) continue; }
+        else if (node.length === 1 && !(c & 1)) { node.length = 0; continue; }
+        node.push(c);
+        if (node.length === 5) {
+          this.point.distance = (node[3] | (node[4] << 8)) / 4;
+          this.point.angle = ((node[1] >> 1) | (node[2] << 7)) / 64;
+          this.point.quality = node[0] >> 2;
+          this.point.startBit = (node[0] & 1) === 1;
+          return RESULT_OK;
+        }
+      }
+      return RESULT_OPERATION_TIMEOUT;
+    }
+    getHealth(info: rplidar_response_device_health_t, timeout = 1000) {
+      if (!this.s) return RESULT_OPERATION_TIMEOUT;
+      this.send(0x52);
+      if (!this.header(0x06, timeout)) return RESULT_OPERATION_TIMEOUT;
+      const d = this.take(3, timeout);
+      if (!d) return RESULT_OPERATION_TIMEOUT;
+      info.status = d[0]; info.error_code = d[1] | (d[2] << 8);
+      return RESULT_OK;
+    }
+    getDeviceInfo(info: rplidar_response_device_info_t, timeout = 1000) {
+      if (!this.s) return RESULT_OPERATION_TIMEOUT;
+      this.send(0x50);
+      if (!this.header(0x04, timeout)) return RESULT_OPERATION_TIMEOUT;
+      const d = this.take(20, timeout);
+      if (!d) return RESULT_OPERATION_TIMEOUT;
+      info.model = d[0]; info.firmware_version = d[1] | (d[2] << 8); info.hardware_version = d[3]; info.serialnum = d.slice(4);
+      return RESULT_OK;
+    }
+  }
+  Object.assign(api, {
+    RPLidar, RPLidarMeasurement, rplidar_response_device_info_t, rplidar_response_device_health_t,
+    RESULT_OK, RESULT_FAIL_BIT, RESULT_OPERATION_TIMEOUT, RESULT_INVALID_DATA,
+    IS_OK: (x: number) => ((x >>> 0) & RESULT_FAIL_BIT) === 0, IS_FAIL: (x: number) => ((x >>> 0) & RESULT_FAIL_BIT) !== 0,
+    RPLIDAR_SERIAL_BAUDRATE: 115200, RPLIDAR_DEFAULT_TIMEOUT: 500,
+  });
+
   // ------------------------------------------------------------------------------- SPI
   // The board's SPI pins (SCK, MOSI, MISO) reach every SPI part wired to them; the one whose CS pin
   // the program holds LOW answers. A transfer that needs the answer waits for it (one simulation

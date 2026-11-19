@@ -165,6 +165,8 @@ export interface PartType {
    *  the vertical; on a face looking down (a chassis' underside) it hangs below it, its top (this
    *  high, cm) against the face. */
   upright?: (p: Record<string, any>) => number;
+  /** Put on the bench, it is fixed in place (a course, a wall): it can still be unfixed in its settings. */
+  fixed?: boolean;
   /** Can be programmed: 'sketch' (Arduino-style program in the app) or 'rp2040' (also real .uf2 firmware). */
   programmable?: 'sketch' | 'rp2040';
 }

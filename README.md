@@ -38,6 +38,28 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
   [library list](https://github.com/codeopen0-cpu/bench-workshop-libraries). Anyone can add one,
   straight from the app (Libraries > Publish). Their code runs sealed off, and every library is
   safety-checked.
+- **Mechanics and flying:** gears that mesh by tooth count, pulleys and belts, tank tracks,
+  mecanum and omni wheels, brushless motors with propellers and ESCs.
+- **Boards:** Arduino Nano and Mega, ESP8266 (NodeMCU, D1 mini), ESP32, ESP32-S3 and C3, Pico and
+  Pico W. ESP32s talk over ESP-NOW; a PS2 controller library is played with a game pad.
+- **Sensors that see:** distance (HC-SR04), a thermal camera (AMG8833, with the Adafruit_AMG88xx
+  library) that sees warm things, and a 360-degree lidar (RPLidar A1, with its RPLidar library).
+- **Real boards:** upload a sketch to a real board on USB from the program editor (with the
+  arduino-cli that comes with the Arduino IDE).
+- **Courses** to test a robot on: ramps and hills, stairs, speed bumps, walls, an arena, rough
+  ground, an obstacle field and line tracks.
+- **Measure** with a ruler (M) and a multimeter (V). **Parts list**: what to buy, with rough prices,
+  and a wiring sheet to print.
+- **Control API**: your own programs (Python, test scripts) drive the bench at
+  `http://127.0.0.1:7420/` (toolbar: API; this PC only): run, step, read where parts are, press
+  their buttons, read serial, load benches and programs. `GET /` there lists it all.
+
+  ```python
+  import requests
+  api = "http://127.0.0.1:7420"
+  requests.post(f"{api}/step", json={"seconds": 2})
+  print(requests.get(f"{api}/parts/chassis").json()["pos"])
+  ```
 - **Learn**: step-by-step lessons, each ending with what's different on a real bench.
 
 ## Questions, bugs, ideas

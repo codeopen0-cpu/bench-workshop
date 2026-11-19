@@ -9,9 +9,10 @@ import { BOARDS } from '../parts/boards';
 import { BOARD_DEVICES } from '../elec/boards';
 import { MECHANICS } from '../parts/mechanics';
 import { AERO } from '../parts/aero';
+import { COURSES } from '../parts/courses';
 import { escDevice } from '../elec/aero';
 import { SENSORS } from '../parts/sensors';
-import { acs712Device, voltageSensorDevice } from '../elec/sensors';
+import { acs712Device, amg8833Device, rplidarDevice, voltageSensorDevice, warmObjectDevice } from '../elec/sensors';
 import { motorDevice } from '../elec/devices';
 
 export function registerKit() {
@@ -19,7 +20,9 @@ export function registerKit() {
   registerParts(BOARDS);
   registerParts(MECHANICS);
   registerParts(AERO);
+  registerParts(COURSES);
   registerParts(SENSORS);
-  Object.assign(DEVICE_MAKERS, MODULE_DEVICES, POWER_DEVICES, BOARD_DEVICES, { 'tank-track': (v: Parameters<typeof motorDevice>[0]) => motorDevice(v), esc: (v: Parameters<typeof escDevice>[0]) => escDevice(v), acs712: (v: Parameters<typeof acs712Device>[0]) => acs712Device(v), 'voltage-sensor': (v: Parameters<typeof voltageSensorDevice>[0]) => voltageSensorDevice(v) });
+  Object.assign(DEVICE_MAKERS, MODULE_DEVICES, POWER_DEVICES, BOARD_DEVICES, { 'tank-track': (v: Parameters<typeof motorDevice>[0]) => motorDevice(v), esc: (v: Parameters<typeof escDevice>[0]) => escDevice(v), acs712: (v: Parameters<typeof acs712Device>[0]) => acs712Device(v), 'voltage-sensor': (v: Parameters<typeof voltageSensorDevice>[0]) => voltageSensorDevice(v),
+    amg8833: (v: Parameters<typeof amg8833Device>[0]) => amg8833Device(v), 'rplidar-a1': (v: Parameters<typeof rplidarDevice>[0]) => rplidarDevice(v), 'warm-object': (v: Parameters<typeof warmObjectDevice>[0]) => warmObjectDevice(v) });
   console.info(`[kit] ${MODULES.length} modules and ${BOARDS.length} more boards registered`);
 }
