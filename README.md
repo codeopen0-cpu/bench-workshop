@@ -26,8 +26,9 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
 - **Wire** pins together. Power, shorts, floating inputs and over-voltage are checked as it runs, and
   **Check** reads the wiring without running it.
 - **Program** boards with Arduino-style sketches written in the app (real ESP32 and Arduino sketches
-  run as they are: `#if`, structs, lambdas, `String`, `Preferences`, `ledc`...), or run a real
-  RP2040 `.uf2` on an emulated chip (GPIO, PWM, ADC, I2C, USB serial).
+  run as they are: `#if`, structs, lambdas, `String`, `Preferences`, `ledc`...), run a real
+  RP2040 `.uf2` on an emulated chip (GPIO, PWM, ADC, I2C, USB serial), or write **MicroPython**:
+  the real MicroPython (1.29, bundled) runs on that chip, with its `>>>` prompt in the serial monitor.
 - **Wi-Fi boards** (ESP32, UNO R4 WiFi layout) join the bench's own network and serve real web pages
   on this PC (127.0.0.1 only; nothing reaches the internet).
 - **Power** that behaves like the real thing: AA, 9 V, coin cells, 18650s, LiPo packs, power banks
@@ -124,4 +125,6 @@ Units throughout are centimetres, grams, seconds and radians.
 
 MIT: see [LICENSE](LICENSE). It uses three.js (MIT), Rapier (Apache-2.0), rp2040js (MIT), Monaco
 (MIT) and Tauri (MIT / Apache-2.0); the RP2040 demo firmware is built with arduino-pico (LGPL-2.1),
-whose source it is built from is in `firmware/rp2040-demo`.
+whose source it is built from is in `firmware/rp2040-demo`. The bundled MicroPython firmware
+(`public/firmware/micropython-rpi-pico-v1.29.0.uf2`, unchanged from micropython.org) is MIT
+licensed: see `public/firmware/MICROPYTHON-LICENSE.txt`.

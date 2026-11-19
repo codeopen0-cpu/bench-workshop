@@ -10,8 +10,10 @@ import rover from './rover.bench?raw';
 import rp2040Modules from './rp2040-modules.bench?raw';
 import servoArm from './servo-arm.bench?raw';
 import servoArmIno from './servo-arm.ino?raw';
+import mpyServo from './micropython-servo.bench?raw';
+import mpyServoPy from './micropython-servo.py?raw';
 
-const FILES: Record<string, string> = { 'obstacle-rover.ino': obstacleIno, 'esp32-web-switch.ino': espSwitchIno, 'wifi-rover.ino': wifiRoverIno, 'servo-arm.ino': servoArmIno };
+const FILES: Record<string, string> = { 'obstacle-rover.ino': obstacleIno, 'esp32-web-switch.ino': espSwitchIno, 'wifi-rover.ino': wifiRoverIno, 'servo-arm.ino': servoArmIno, 'micropython-servo.py': mpyServoPy };
 
 function withFiles(text: string) {
   const p = JSON.parse(text);
@@ -26,5 +28,6 @@ export const EXAMPLES: { name: string; description: string; text: string }[] = [
   { name: 'RP2040 and I2C modules', description: 'A real RP2040 program (.uf2) on an emulated chip: it scans its I2C bus, reads the motion sensor and swings the servo through the servo driver. Press Run and open its serial monitor (Program).', text: rp2040Modules },
   { name: 'Wi-Fi remote-control rover', description: 'A two-wheel car driven from a web page: an ESP32 and an L298N motor driver. Press Run, then select the ESP32 in the run panel and press "Open its web page". The sketch lists every wire.', text: withFiles(wifiRover) },
   { name: 'ESP32 web switch', description: 'An ESP32 joins the bench Wi-Fi and serves a web page that switches its LED and shows its knob. Press Run, then select the ESP32 in the run panel and press "Open its web page".', text: withFiles(espSwitch) },
+  { name: 'MicroPython servo and button', description: 'Real MicroPython on the emulated RP2040: a button steps a servo through 0, 90 and 180 degrees. Press Run, click the button, and open the Pico\'s program (Program) to see the Python and its serial (with a live >>> prompt when it ends).', text: withFiles(mpyServo) },
   { name: 'Servo arm', description: 'A servo on a stand lifting a steel weight, steered by a knob through a board. Press Run and drag the knob slider in the run panel. Make the weight bigger (or swap in the small SG90) and see when the servo stalls.', text: withFiles(servoArm) },
 ];

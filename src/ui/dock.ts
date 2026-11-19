@@ -38,6 +38,23 @@ void loop() {
 }
 `;
 
+export const DEFAULT_PYTHON = `# MicroPython on the RP2040 (the real MicroPython, running on the emulated chip).
+# Blink the board's LED (GP25) and an LED on GP7, and count in the serial monitor.
+from machine import Pin
+import time
+
+led = Pin(25, Pin.OUT)
+ext = Pin(7, Pin.OUT)
+n = 0
+while True:
+    led.toggle()
+    ext.value(led.value())
+    n += 1
+    print("blink", n)
+    time.sleep(0.5)
+`;
+const monacoLang = (l: Program['lang']) => (l === 'arduino' ? 'cpp' : l === 'python' ? 'python' : 'javascript');
+
 // Autocomplete and hover help for the program API (JavaScript mode).
 const API_DTS = `
 declare const HIGH: 1, LOW: 0, INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, INPUT_PULLDOWN: 3, LED_BUILTIN: number;
@@ -100,6 +117,7 @@ export class Dock {
   el: HTMLElement;
   private title = h('span', { className: 'dock-title' });
   private lang = h('select', { title: 'Language' }) as HTMLSelectElement;
+  private pyOpt = h('option', { value: 'python', textContent: 'MicroPython (RP2040)' }) as HTMLOptionElement;
   private fwBtn = h('button', { textContent: 'Load firmware (.uf2)...', title: 'Run a real compiled RP2040 program instead of the code here' }) as HTMLButtonElement;
   private fwNote = h('span', { className: 'note' });
   private editorHost = h('div', { className: 'dock-editor' });
@@ -118,7 +136,7 @@ export class Dock {
   private plotPending = false;
 
   constructor(parent: HTMLElement, private hooks: DockHooks) {
-    this.lang.append(h('option', { value: 'js', textContent: 'JavaScript' }), h('option', { value: 'arduino', textContent: 'Arduino C++ (simple sketches)' }));
+    this.lang.append(h('option', { value: 'js', textContent: 'JavaScript' }), h('option', { value: 'arduino', textContent: 'Arduino C++ (simple sketches)' }), this.pyOpt);
     this.lang.onchange = () => this.changeLang();
     this.fwBtn.onclick = () => this.uid && hooks.loadFirmware(this.uid);
     this.serialIn.onkeydown = (e) => {
@@ -155,13 +173,15 @@ export class Dock {
     this.el.style.display = '';
     this.title.textContent = `Program: ${this.hooks.boardName(uid)}`;
     let prog = this.hooks.program(uid);
+    const rp = this.hooks.canLoadFirmware(uid); // (an RP2040: it runs MicroPython too)
     if (!prog) {
-      prog = { lang: 'js', source: DEFAULT_JS };
+      prog = rp ? { lang: 'python', source: DEFAULT_PYTHON } : { lang: 'js', source: DEFAULT_JS };
       this.hooks.setProgram(uid, prog);
     }
+    this.pyOpt.hidden = this.pyOpt.disabled = !rp;
     this.lang.value = prog.lang;
     this.fwBtn.style.display = this.hooks.canLoadFirmware(uid) ? '' : 'none';
-    this.fwNote.textContent = prog.firmware ? `runs ${prog.firmwareName ?? 'firmware'} (the code here is ignored)` : '';
+    this.fwNote.textContent = prog.lang === 'python' ? 'runs on MicroPython 1.29' : prog.firmware ? `runs ${prog.firmwareName ?? 'firmware'} (the code here is ignored)` : '';
     this.serialPre.textContent = this.serial.get(uid) ?? '';
     this.drawPlot();
     if (!this.monaco) {
@@ -178,7 +198,7 @@ export class Dock {
     }
     if (this.uid !== uid) return;
     const model = this.editor!.getModel()!;
-    this.monaco.editor.setModelLanguage(model, prog.lang === 'arduino' ? 'cpp' : 'javascript');
+    this.monaco.editor.setModelLanguage(model, monacoLang(prog.lang));
     if (model.getValue() !== prog.source) model.setValue(prog.source);
     this.monaco.editor.setModelMarkers(model, 'bench', []);
   }
@@ -192,9 +212,11 @@ export class Dock {
     if (!this.uid || !this.editor || !this.monaco) return;
     const lang = this.lang.value as Program['lang'];
     const src = this.editor.getValue();
-    const isDefault = src === DEFAULT_JS || src === DEFAULT_ARDUINO;
-    this.monaco.editor.setModelLanguage(this.editor.getModel()!, lang === 'arduino' ? 'cpp' : 'javascript');
-    if (isDefault) this.editor.setValue(lang === 'arduino' ? DEFAULT_ARDUINO : DEFAULT_JS);
+    const isDefault = !src.trim() || src === DEFAULT_JS || src === DEFAULT_ARDUINO || src === DEFAULT_PYTHON;
+    this.monaco.editor.setModelLanguage(this.editor.getModel()!, monacoLang(lang));
+    this.save();
+    this.refreshFirmwareNote();
+    if (isDefault) this.editor.setValue(lang === 'arduino' ? DEFAULT_ARDUINO : lang === 'python' ? DEFAULT_PYTHON : DEFAULT_JS);
     this.save();
   }
 
@@ -340,6 +362,6 @@ export class Dock {
   refreshFirmwareNote() {
     if (!this.uid) return;
     const prog = this.hooks.program(this.uid);
-    this.fwNote.textContent = prog?.firmware ? `runs ${prog.firmwareName ?? 'firmware'} (the code here is ignored)` : '';
+    this.fwNote.textContent = prog?.lang === 'python' ? 'runs on MicroPython 1.29' : prog?.firmware ? `runs ${prog.firmwareName ?? 'firmware'} (the code here is ignored)` : '';
   }
 }

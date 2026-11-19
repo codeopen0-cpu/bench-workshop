@@ -1,0 +1,19 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "MicroPython servo and button",
+ "parts": [
+  {"uid": "pico", "type": "rp2040-board", "name": "Pico", "params": {"usb": true}, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1]},
+  {"uid": "servo", "type": "servo-sg90", "name": "Servo", "params": {"start": 0}, "parent": null, "pos": [10, 0, 0], "rot": [0, 0, 0, 1], "pinned": true},
+  {"uid": "button", "type": "button", "name": "Button", "params": {"color": "#d23b3b"}, "parent": null, "pos": [0, 0, 8], "rot": [0, 0, 0, 1], "pinned": true}
+ ],
+ "wires": [
+  {"id": "w1", "a": {"uid": "pico", "pin": "VBUS"}, "b": {"uid": "servo", "pin": "V+"}, "color": "#e04848", "length": 10.5},
+  {"id": "w2", "a": {"uid": "pico", "pin": "GND"}, "b": {"uid": "servo", "pin": "GND"}, "color": "#2b2d33", "length": 12},
+  {"id": "w3", "a": {"uid": "pico", "pin": "GP15"}, "b": {"uid": "servo", "pin": "SIG"}, "color": "#e8c547", "length": 12.5},
+  {"id": "w4", "a": {"uid": "pico", "pin": "GP14"}, "b": {"uid": "button", "pin": "1"}, "color": "#4f9cff", "length": 8.5},
+  {"id": "w5", "a": {"uid": "button", "pin": "2"}, "b": {"uid": "pico", "pin": "GND2"}, "color": "#3fbf7f", "length": 12}
+ ],
+ "programs": {"pico": {"lang": "python", "source": "@micropython-servo.py"}},
+ "boards": []
+}

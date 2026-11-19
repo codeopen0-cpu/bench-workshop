@@ -6,7 +6,7 @@ import type { Circuit, Device, I2CChip } from '../elec/circuit';
 import { glow, lensMeshes, type DeviceHooks } from '../elec/devices';
 import type { Project } from '../project';
 import type { PartView } from '../views';
-import { C, EVENTS, GP, MREQ, OUT, Rp2040Shared } from './rp2040-layout';
+import { C, EVENTS, GP, MREQ, OUT, Rp2040Shared, SERIAL_IN } from './rp2040-layout';
 import Rp2040Worker from './rp2040-worker.ts?worker';
 
 export interface Rp2040Spec {
@@ -24,6 +24,10 @@ export interface Rp2040Spec {
   status?(): string[];
 }
 
+/** MicroPython for the Pico (micropython.org, MIT licence), shipped with the app: a board whose program
+ *  is in Python runs it, and gets the program through its REPL */
+export const MICROPYTHON = { url: '/firmware/micropython-rpi-pico-v1.29.0.uf2', name: 'MicroPython 1.29.0' };
+
 const fetched = new Map<string, Promise<Uint8Array>>();
 const fetchBytes = (url: string) => {
   if (!fetched.has(url)) fetched.set(url, fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${url}: ${r.status}`)))).then((b) => new Uint8Array(b)));
@@ -38,6 +42,76 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
   let worker: Worker | null = null;
   let starting = false, crashed: string | null = null, fwName = '', powered = false, warnedNoFw = false;
   let pending: ((ok: boolean, data: number[] | null) => void) | null = null;
+  // typing into its USB serial: through the shared ring the chip's thread reads
+  const type = (bytes: Uint8Array) => {
+    let h = Atomics.load(sh.ctl, C.SIN_HEAD);
+    for (const b of bytes) {
+      const next = (h + 1) % SERIAL_IN;
+      if (next === Atomics.load(sh.ctl, C.SIN_TAIL)) { hooks.log(`${v.inst.name}: its serial input is full`, 'warn'); break; }
+      sh.sin[h] = b;
+      h = next;
+    }
+    Atomics.store(sh.ctl, C.SIN_HEAD, h);
+  };
+  // MicroPython: the program goes in through the raw REPL (Ctrl-A, the code, Ctrl-D), as Thonny and
+  // mpremote send it; what the REPL says back for itself is kept out of the serial monitor
+  let py: { stage: 'boot' | 'raw' | 'run' | 'back' | 'repl'; code: string; buf: string } | null = null;
+  const fromChip = (text: string) => {
+    if (!py) return hooks.serial(uid, text);
+    text = text.replace(/\r\n?/g, '\n'); // (MicroPython ends lines with CR LF)
+    if (py.stage === 'repl') return hooks.serial(uid, text);
+    py.buf += text;
+    if (py.stage === 'back') {
+      // (leaving the raw REPL prints the banner again: only its prompt is shown)
+      const i = py.buf.indexOf('>>> ');
+      if (i < 0) return;
+      hooks.serial(uid, py.buf.slice(i));
+      py.buf = '';
+      py.stage = 'repl';
+      return;
+    }
+    if (py.stage === 'boot') {
+      const i = py.buf.indexOf('>>> ');
+      if (i < 0) return;
+      hooks.serial(uid, py.buf.slice(0, i).replace(/\n$/, '') + '\n'); // (its banner)
+      py.buf = '';
+      py.stage = 'raw';
+      console.info(`[micropython] ${v.inst.name}: REPL up, sending the program (${py.code.length} chars)`);
+      type(new TextEncoder().encode('\r\x03\x03\x01'));
+      return;
+    }
+    if (py.stage === 'raw') {
+      const i = py.buf.indexOf('raw REPL; CTRL-B to exit\n>');
+      if (i < 0) return;
+      py.buf = '';
+      py.stage = 'run';
+      type(new TextEncoder().encode(py.code.replace(/\r\n/g, '\n') + '\n\x04'));
+      return;
+    }
+    // running: "OK", then its output, then \x04, any error, \x04 and ">"
+    if (py.buf.startsWith('OK')) py.buf = py.buf.slice(2);
+    const end = py.buf.indexOf('\x04');
+    if (end < 0) {
+      // (pass the output on as it comes, keeping back a part that might be the start of the ending)
+      hooks.serial(uid, py.buf);
+      py.buf = '';
+      return;
+    }
+    const out = py.buf.slice(0, end);
+    const rest = py.buf.slice(end + 1);
+    const end2 = rest.indexOf('\x04');
+    if (end2 < 0) { if (out) hooks.serial(uid, out); py.buf = py.buf.slice(end); return; }
+    const err = rest.slice(0, end2);
+    hooks.serial(uid, out + err + '[the program ended: the >>> prompt is yours (type in the box below)]\n');
+    if (err) {
+      const line = /line (\d+)/.exec(err.split('\n').filter((l) => /File "<stdin>"/.test(l)).pop() ?? '');
+      hooks.error?.(uid, line ? Number(line[1]) : null, err.trim().split('\n').pop() ?? 'error');
+    }
+    console.info(`[micropython] ${v.inst.name}: program ended${err ? ' with an error' : ''}`);
+    py.stage = 'back';
+    py.buf = '';
+    type(new TextEncoder().encode('\x02')); // (back to the ordinary REPL)
+  };
   const queue: (() => void)[] = [];
   let busSda: string | undefined, busScl: string | undefined; // the pins its I2C is on now
   let mTransfers = 0;
@@ -47,7 +121,11 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
     try {
       const prog = project.programs[uid];
       let bytes: Uint8Array;
-      if (prog?.firmware) {
+      if (prog?.lang === 'python') {
+        bytes = await fetchBytes(MICROPYTHON.url);
+        fwName = MICROPYTHON.name;
+        py = { stage: 'boot', code: prog.source ?? '', buf: '' };
+      } else if (prog?.firmware) {
         bytes = Uint8Array.from(atob(prog.firmware), (ch) => ch.charCodeAt(0));
         fwName = prog.firmwareName ?? 'your firmware';
       } else if (spec.defaultFirmware) {
@@ -62,7 +140,7 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
       worker = new Rp2040Worker();
       worker.onmessage = (e) => {
         const msg = e.data;
-        if (msg.type === 'serial') hooks.serial(uid, msg.text);
+        if (msg.type === 'serial') fromChip(msg.text);
         else if (msg.type === 'log') console.info(`[rp2040] ${v.inst.name}: ${msg.message}`);
         else if (msg.type === 'error') {
           crashed = msg.message;
@@ -191,7 +269,11 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
       for (let n = 0; n < GP; n++) {
         const pin = pins[n];
         if (!pin) continue;
-        sh.inp[n] = c.level(uid, pin) ?? (sh.pull[n] === 2 ? 0 : sh.pull[n] === 1 ? 1 : 0);
+        // (-1: floating, or held only by the chip's own pull: the chip applies its pull itself, at once)
+        const net = c.net(uid, pin);
+        const own = `${v.inst.name} GP${n} pull-`;
+        const onlyOwn = !net || net.drives.every((d) => d.strength === 0 && d.src.startsWith(own));
+        sh.inp[n] = onlyOwn ? -1 : c.level(uid, pin) ?? -1;
         if (n >= 26) sh.adc[n - 26] = Math.round(Math.max(0, Math.min(1, c.avg(uid, pin) / 3.3)) * 4095);
       }
     },
@@ -224,6 +306,11 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
       return out;
     },
     current: () => (powered ? 0.03 : 0),
+    sendSerial(text: string) {
+      if (!worker) return;
+      // (the serial monitor's Enter is a newline; a REPL wants a carriage return)
+      type(new TextEncoder().encode(py ? text.replace(/\n/g, '\r') : text));
+    },
     dispose() {
       worker?.terminate();
       worker = null;

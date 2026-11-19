@@ -2140,6 +2140,7 @@ export class App {
       'Flying: a Brushless motor + propeller on an ESC (servo signal from a board: 1000 us to arm, up to 2000 for full thrust); wired straight it turns clockwise, two phase wires swapped counter-clockwise, to suit its propeller. ' +
       'The move / turn arrows sit at the centre of the selected part (Grid menu: or its centre of mass, or its base). ' +
       'API (toolbar): your own programs drive the bench at http://127.0.0.1:7420/ (run, step, positions, buttons, serial; GET / there lists it all; this PC only, never web pages). ' +
+      'MicroPython: an RP2040 board runs the real MicroPython: choose MicroPython in its program editor and write Python (machine.Pin, PWM, ADC, I2C, time); when the program ends, its >>> prompt is yours in the serial box. ' +
       'Sensors: a Thermal camera (AMG8833, 8 x 8 temperatures; Adafruit_AMG88xx) sees Warm objects; a Lidar (RPLidar A1; the RPLidar library on a serial port) measures all the way round. ' +
       'Courses (parts list): a ramp or hill, stairs, speed bumps, walls, an arena, rough ground, an obstacle field and line tracks to test a robot on; they are fixed in place on the bench. ' +
       'Ruler (M): click two points for the distance. Meter (V): a multimeter: click a pin (red probe), then another (black); it reads live while running. Parts list: what to buy with rough prices, and a wiring sheet to copy, save or print. ' +

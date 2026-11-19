@@ -22,12 +22,15 @@ export const C = {
   I2C_SCL: 16,
   EV_HEAD: 17, // pin-change log (ring of EVENTS), written by the chip's thread...
   EV_TAIL: 18, // ...read by the simulation each step
+  SIN_HEAD: 19, // bytes typed into its USB serial (ring of SERIAL_IN), written by the simulation...
+  SIN_TAIL: 20, // ...read by the chip's thread
 } as const;
 export const EVENTS = 8192;
+export const SERIAL_IN = 16384;
 export const MREQ = { PROBE: 1, WRITE: 2, READ: 3 } as const;
 export const OUT = { INPUT: 0, LOW: 1, HIGH: 2, PWM: 3 } as const;
 
-const O = { ctl: 0, f64: 128, out: 256, duty: 384, hz: 640, pull: 896, inp: 1024, adc: 1152, req: 1168, resp: 1680, mreq: 2192, mresp: 2704, ev: 3216, size: 3216 + EVENTS * 4 };
+const O = { ctl: 0, f64: 128, out: 256, duty: 384, hz: 640, pull: 896, inp: 1024, adc: 1152, req: 1168, resp: 1680, mreq: 2192, mresp: 2704, ev: 3216, sin: 3216 + EVENTS * 4, size: 3216 + EVENTS * 4 + SERIAL_IN };
 
 export class Rp2040Shared {
   sab: SharedArrayBuffer;
@@ -44,6 +47,7 @@ export class Rp2040Shared {
   mreq: Uint8Array;
   mresp: Uint8Array;
   ev: Int32Array; // (pin << 1) | level
+  sin: Uint8Array; // USB serial input ring
   constructor(sab?: SharedArrayBuffer) {
     this.sab = sab ?? new SharedArrayBuffer(O.size);
     const s = this.sab;
@@ -60,6 +64,7 @@ export class Rp2040Shared {
     this.mreq = new Uint8Array(s, O.mreq, 512);
     this.mresp = new Uint8Array(s, O.mresp, 512);
     this.ev = new Int32Array(s, O.ev, EVENTS);
+    this.sin = new Uint8Array(s, O.sin, SERIAL_IN);
     if (!sab) this.ctl[C.SAR] = this.ctl[C.I2C_SDA] = this.ctl[C.I2C_SCL] = -1;
   }
 }

@@ -358,6 +358,10 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       c.warnOnce(`noprog:${uid}`, `${name(v)} has power but no program: select it and press Program`);
       return;
     }
+    if (prog.lang === 'python') {
+      c.warnOnce(`py:${uid}`, `${name(v)}'s program is MicroPython: that runs on an RP2040 board (RP2040 board (.uf2)); switch this one to Arduino C++ or JavaScript`, 'bad');
+      return;
+    }
     let code = prog.source;
     const includes = [...code.matchAll(/^\s*(?:\/\/\s*)?#\s*include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]).filter((x) => !BUILTIN_INCLUDES.test(x));
     const libs = sketchLibraries.resolve(includes);

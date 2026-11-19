@@ -1,7 +1,7 @@
 {
   "name": "bench-workshop",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Bench Workshop: a 3D workbench with physics to build, wire, program and test boards and the things they drive.",
   "type": "module",
   "scripts": {

@@ -5,7 +5,7 @@
 // mode (the chip answering at its own address) is added here (I2CTarget below).
 import { RP2040, RPI2C, USBCDC } from 'rp2040js';
 import { bootromB1 } from './bootrom-rp2040';
-import { C, EVENTS, GP, MREQ, OUT, Rp2040Shared } from './rp2040-layout';
+import { C, EVENTS, GP, MREQ, OUT, Rp2040Shared, SERIAL_IN } from './rp2040-layout';
 
 const post = (m: any) => (self as any).postMessage(m);
 
@@ -229,6 +229,12 @@ function run(sab: SharedArrayBuffer, uf2: Uint8Array) {
   };
   for (const pin of mcu.gpio) pin.addListener((state) => {
     if (pin.index === bus.sda || pin.index === bus.scl) bbEdge();
+    // the pad, straight away (not at the next sync): an output reads back what it drives; a pin with
+    // nothing on it reads its own pull (states: 0 low, 1 high, 2 input, 3 pulled up, 4 pulled down)
+    if (pin.index < GP && pin.index !== bus.sda && pin.index !== bus.scl) {
+      if (state === 0 || state === 1) pin.setInputValue(state === 1);
+      else if (sh.inp[pin.index] < 0 && state !== 5) pin.setInputValue(state === 3);
+    }
     if (pin.index < GP && (state === 0 || state === 1) && state !== lastLv[pin.index]) {
       lastLv[pin.index] = state;
       logEdge(pin.index, state);
@@ -239,8 +245,21 @@ function run(sab: SharedArrayBuffer, uf2: Uint8Array) {
   let serial = '';
   const dec = new TextDecoder();
   cdc.onSerialData = (buf) => (serial += dec.decode(buf, { stream: true }));
+  let usbUp = false;
   cdc.onDeviceConnected = () => {
+    usbUp = true;
+    post({ type: 'log', message: 'USB serial connected' });
     for (const ch of new TextEncoder().encode('\n')) cdc.sendSerialByte(ch); // DTR: "a terminal is open"
+  };
+  /** what was typed into its serial monitor (or sent by the app: MicroPython programs) */
+  const typed = () => {
+    if (!usbUp) return;
+    let t = Atomics.load(sh.ctl, C.SIN_TAIL);
+    const h = Atomics.load(sh.ctl, C.SIN_HEAD);
+    let n = 0;
+    const fifo = (cdc as any).txFIFO; // (512 bytes towards the chip: wait while it's full, as a real host would)
+    while (t !== h && n < 64 && !fifo?.full) { cdc.sendSerialByte(sh.sin[t]); t = (t + 1) % SERIAL_IN; n++; }
+    if (n) Atomics.store(sh.ctl, C.SIN_TAIL, t);
   };
   post({ type: 'log', message: `firmware loaded (${blocks} blocks, ${(blocks / 4).toFixed(0)} KB)` });
   Atomics.store(sh.ctl, C.STATE, 1);
@@ -287,7 +306,9 @@ function run(sab: SharedArrayBuffer, uf2: Uint8Array) {
       }
       else if (pin.outputEnable) sh.out[p] = pin.outputValue ? OUT.HIGH : OUT.LOW;
       else sh.out[p] = OUT.INPUT;
-      const lv = sh.inp[p];
+      // (an output pin reads back what it drives, as the real pad does: MicroPython's Pin.value())
+      // (-1: nothing on its net: it reads its own pull-up / pull-down at once, as the real pin does)
+      const lv = pin.outputEnable && fn === 5 ? (pin.outputValue ? 1 : 0) : sh.inp[p] < 0 ? (pin.pullupEnabled ? 1 : 0) : sh.inp[p];
       if (owned(p)) lastIn[p] = -1; // the bus model below sets these
       else if (lv !== lastIn[p]) {
         lastIn[p] = lv;
@@ -344,6 +365,7 @@ function run(sab: SharedArrayBuffer, uf2: Uint8Array) {
   post({ type: 'log', message: 'running' });
   for (;;) {
     syncPins();
+    typed();
     if (Atomics.load(sh.ctl, C.REQ) === 1) {
       transact();
       Atomics.store(sh.ctl, C.REQ, 2);

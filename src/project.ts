@@ -28,7 +28,7 @@ export interface Wire {
   length?: number;
 }
 export interface Program {
-  lang: 'js' | 'arduino'; // JavaScript, or simple Arduino C++ (translated to JavaScript)
+  lang: 'js' | 'arduino' | 'python'; // JavaScript, simple Arduino C++ (translated to JavaScript), or MicroPython (RP2040 boards: the real MicroPython runs it)
   source: string;
   firmware?: string; // rp2040 boards: a .uf2 to run instead, base64
   firmwareName?: string;
@@ -118,7 +118,7 @@ export function validate(data: any): { project: Project | null; problems: string
   const programs: Record<string, Program> = {};
   for (const [uid, prog] of Object.entries<any>(data.programs ?? {}))
     if (uids.has(uid) && prog && typeof prog.source === 'string')
-      programs[uid] = { lang: prog.lang === 'arduino' ? 'arduino' : 'js', source: prog.source, firmware: prog.firmware, firmwareName: prog.firmwareName };
+      programs[uid] = { lang: prog.lang === 'arduino' || prog.lang === 'python' ? prog.lang : 'js', source: prog.source, firmware: prog.firmware, firmwareName: prog.firmwareName };
   return {
     project: { format: 'bench-workshop', version: 1, name: String(data.name ?? 'Untitled'), parts, wires, programs, boards: Array.isArray(data.boards) ? data.boards : [],
       wifi: data.wifi && typeof data.wifi.ssid === 'string' ? { ssid: String(data.wifi.ssid).slice(0, 32), pass: String(data.wifi.pass ?? '').slice(0, 63) } : undefined,
