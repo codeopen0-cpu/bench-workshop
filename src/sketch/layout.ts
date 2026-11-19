@@ -2,7 +2,7 @@
 // Pin state goes both ways through plain arrays; calls that need an answer from the simulation
 // (I2C, pulseIn) go through a one-slot mailbox: the program thread posts a request and sleeps
 // (Atomics.wait) until the simulation answers it in its next step.
-export const PINS = 64;
+export const PINS = 128; // (an Arduino Mega has 70: D0-D53, A0-A15 = 54-69)
 
 export const CTL = {
   STEP: 0, // incremented by the simulation every step (the program waits on it to let time pass)
@@ -38,7 +38,7 @@ export const PKT_RING = 32768;
 /** message kinds (one byte in the rings); the same names libraries use */
 export const PROTOS = ['', 'uart', 'pixels', 'data', 'ir', 'onewire', 'raw', 'spi'] as const;
 /** an SPI message's first bytes: which of the board's pins were high when it was sent (bit p = pin p) */
-export const SPI_SNAP = 8;
+export const SPI_SNAP = PINS / 8;
 export const protoCode = (p: string | number) => (typeof p === 'number' ? p : Math.max(0, PROTOS.indexOf(p as any)));
 export const HTTP_REQ_MAX = 64 * 1024;
 export const HTTP_RESP_MAX = 1024 * 1024;
@@ -47,27 +47,34 @@ export const EVENTS = 8192;
 export const REQ = { I2C_WRITE: 1, I2C_READ: 2, PULSE_IN: 3, WIFI_JOIN: 4, HTTP_LISTEN: 5, SPI: 6 } as const;
 export const MODE = { INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, INPUT_PULLDOWN: 3, UNUSED: -1 } as const;
 
-const OFF = {
-  ctl: 0, // Int32 x 32
-  f64: 128, // Float64 x 16: [0] = simulation time, ms
-  mode: 256, // Int32 x 64
-  out: 512, // Int32 x 64 (0/1)
-  inp: 768, // Int32 x 64 (0/1)
-  analog: 1024, // Int32 x 64 (0..4095)
-  duty: 1280, // Float64 x 64 (0..1; with hz > 0 = PWM)
-  hz: 1792, // Float64 x 64
-  req: 2304, // Uint8 x 512
-  resp: 2816, // Uint8 x 512
-  serial: 3328, // Uint8 x 1024 (ring)
-  rise: 4352, // Int32 x 64: rising edges written by the program (catches pulses shorter than a step)
-  ev: 4608, // Int32 x EVENTS: pin changes in order, (pin << 1) | level
-  httpReq: 4608 + EVENTS * 4, // Uint8 x HTTP_REQ_MAX: a web request (JSON)
-  httpResp: 4608 + EVENTS * 4 + 64 * 1024, // Uint8 x HTTP_RESP_MAX: its answer (JSON)
-  pktOut: 4608 + EVENTS * 4 + 64 * 1024 + 1024 * 1024, // Uint8 x PKT_RING
-  pktIn: 4608 + EVENTS * 4 + 64 * 1024 + 1024 * 1024 + PKT_RING, // Uint8 x PKT_RING
-  inEv: 4608 + EVENTS * 4 + 64 * 1024 + 1024 * 1024 + 2 * PKT_RING, // Int32 x IN_EVENTS: (pin << 1) | level
-  size: 4608 + EVENTS * 4 + 64 * 1024 + 1024 * 1024 + 2 * PKT_RING + IN_EVENTS * 4,
-};
+// where each array starts in the shared memory (one after another, sized by PINS)
+const OFF = (() => {
+  let at = 0;
+  const take = (bytes: number) => { const o = at; at += Math.ceil(bytes / 8) * 8; return o; };
+  const o = {
+    ctl: take(32 * 4), // Int32 x 32
+    f64: take(16 * 8), // Float64 x 16: [0] = simulation time, ms
+    mode: take(PINS * 4), // Int32 x PINS
+    out: take(PINS * 4), // Int32 x PINS (0/1)
+    inp: take(PINS * 4), // Int32 x PINS (0/1)
+    analog: take(PINS * 4), // Int32 x PINS (0..4095: the voltage over the board's analog reference)
+    duty: take(PINS * 8), // Float64 x PINS (0..1; with hz > 0 = PWM)
+    hz: take(PINS * 8), // Float64 x PINS
+    req: take(512), // Uint8 x 512
+    resp: take(512), // Uint8 x 512
+    serial: take(1024), // Uint8 x 1024 (ring)
+    rise: take(PINS * 4), // Int32 x PINS: rising edges written by the program (catches pulses shorter than a step)
+    ev: take(EVENTS * 4), // Int32 x EVENTS: pin changes in order, (pin << 1) | level
+    httpReq: take(HTTP_REQ_MAX), // Uint8: a web request (JSON)
+    httpResp: take(HTTP_RESP_MAX), // Uint8: its answer (JSON)
+    pktOut: take(PKT_RING), // Uint8 x PKT_RING
+    pktIn: take(PKT_RING), // Uint8 x PKT_RING
+    inEv: take(IN_EVENTS * 4), // Int32 x IN_EVENTS: (pin << 1) | level
+    size: 0,
+  };
+  o.size = at;
+  return o;
+})();
 
 export class Shared {
   sab: SharedArrayBuffer;

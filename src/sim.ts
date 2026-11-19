@@ -2,6 +2,8 @@
 // shapes), so glue never wobbles; only real moving joints (servo shafts, motor hubs) are joints, each
 // driven by a motor with the actuator's real torque limit and speed.
 import type RAPIER_NS from '@dimforge/rapier3d-compat';
+import { Mechanics } from './mechanics';
+import { placeTrackLinks, type TrackLook } from './parts/mechanics';
 import * as THREE from 'three';
 import { GRAVITY, KGCM, type ActuatorSpec, type JointDef, type Shape } from './parts/types';
 import type { PartView } from './views';
@@ -83,6 +85,11 @@ export class Sim {
   } | null = null;
   /** touch surfaces of library parts ("touch" in their shape): `${uid}/${tag}` -> colliders */
   private tagged = new Map<string, RAPIER_NS.Collider[]>();
+  /** every body's colliders, by part uid / body name */
+  private bodyColliders = new Map<string, RAPIER_NS.Collider[]>();
+  /** gears, belts, tank tracks, roller wheels */
+  mech!: Mechanics;
+  private tracks: { data: TrackLook; act: Actuator }[] = [];
   /** the pushing ball: follows the mouse while you hold Shift (it shoves things) */
   private hand: { rb: RAPIER_NS.RigidBody; col: RAPIER_NS.Collider; on: boolean } | null = null;
   /** what a hand can do: about 60 N (lifts 6 kg), and turn things with about 3 N*m */
@@ -94,6 +101,7 @@ export class Sim {
     views: PartView[],
     runRoot: THREE.Group,
     private log: (msg: string, level?: 'info' | 'warn' | 'bad') => void,
+    belts: { a: string; b: string }[] = [],
   ) {
     this.world = new R.World({ x: 0, y: -GRAVITY, z: 0 });
     this.world.timestep = STEP;
@@ -182,7 +190,11 @@ export class Sim {
             .setDensity((def.mass * (vol / totalVol)) / vol)
             .setFriction(c.friction ?? 0.7)
             .setRestitution(c.restitution ?? 0.1);
+          if (c.frictionMin) cd.setFrictionCombineRule(R.CoefficientCombineRule.Min);
           const col = this.world.createCollider(cd, rb);
+          const bk = keyOf(m.view.inst.uid, m.body);
+          if (!this.bodyColliders.has(bk)) this.bodyColliders.set(bk, []);
+          this.bodyColliders.get(bk)!.push(col);
           if (c.tag) {
             const k = `${m.view.inst.uid}/${c.tag}`;
             if (!this.tagged.has(k)) this.tagged.set(k, []);
@@ -228,6 +240,29 @@ export class Sim {
         this.applyMotor(a);
         this.actuators.push(a);
       }
+
+    // 3b. mechanics: gears, pulleys and belts, tank tracks' wheels, roller wheels (mechanics.ts)
+    this.mech = new Mechanics(this.world, log);
+    for (const v of views)
+      for (const d of v.build.mech ?? []) {
+        const obj = v.bodies.get(d.body), g = this.byKey.get(keyOf(v.inst.uid, d.body));
+        if (!obj || !g) continue;
+        const c = new THREE.Vector3(...d.at).applyMatrix4(obj.matrixWorld);
+        const n = new THREE.Vector3(...d.axis).transformDirection(obj.matrixWorld).normalize();
+        const t = g.rb.translation();
+        // (rigid bodies start world-aligned: their frame is the world's turned by nothing)
+        this.mech.add({ def: d, view: v, rb: g.rb, local: c.sub(new THREE.Vector3(t.x, t.y, t.z)), axisL: n, colliders: this.bodyColliders.get(keyOf(v.inst.uid, d.body)) ?? [], grip: Number(v.inst.params.grip ?? 1) });
+      }
+    if (this.mech.items.length) this.mech.link(belts);
+
+    // tank tracks: their links go round as their sprocket turns (drawn in sync)
+    for (const v of views)
+      for (const b of v.bodies.values())
+        b.traverse((o) => {
+          if (!o.userData.track) return;
+          const act = this.actuators.find((a) => a.view === v && a.def.name === 'sprocket');
+          if (act) this.tracks.push({ data: o.userData.track, act });
+        });
 
     // 4. drawing: every body moves to runRoot and follows its group from now on
     for (const g of this.groups) for (const m of g.members) runRoot.attach(m.obj);
@@ -627,7 +662,9 @@ export class Sim {
       rb.applyTorqueImpulse({ x: tq.x * STEP, y: tq.y * STEP, z: tq.z * STEP }, true);
     }
     if (this.wireRopes.length) this.pullWires();
+    if (this.mech.items.length) this.mech.before(STEP);
     this.world.step();
+    if (this.mech.items.length) this.mech.after(STEP);
     this.time += STEP;
     for (const a of this.actuators) {
       const prev = a.angle;
@@ -682,6 +719,7 @@ export class Sim {
 
   /** Move every body's drawing to where its rigid group is now. */
   sync() {
+    for (const t of this.tracks) placeTrackLinks(t.data, t.act.total);
     const p = new THREE.Vector3(), q = new THREE.Quaternion();
     for (const g of this.groups) {
       const t = g.rb.translation(), r = g.rb.rotation();

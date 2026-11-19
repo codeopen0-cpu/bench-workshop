@@ -47,6 +47,7 @@ export class App {
   selected: string | null = null;
   placing: { type: PartType; ghost: PartView; spin: number; valid: boolean; hit: ReturnType<Stage['pick']> } | null = null;
   gluing: string | null = null; // picking what the selected part gets glued to
+  belting: string | null = null; // picking the pulley the selected one gets a belt to
   sim: Sim | null = null;
   circuit: Circuit | null = null;
   wiring = false; // wire mode: click pin, then pin
@@ -203,7 +204,19 @@ export class App {
       loadFirmware: (uid) => this.loadFirmware(uid),
       sendSerial: (uid, text) => this.circuit?.devices.find((d) => d.view.inst.uid === uid)?.sendSerial?.(text),
     });
-    this.stage.gizmo.addEventListener('mouseDown', () => this.snapshot());
+    this.stage.gizmo.addEventListener('mouseDown', () => {
+      this.snapshot();
+      const v = this.selected ? this.views.get(this.selected) : null;
+      if (!v) return;
+      this.placePivot(v);
+      v.root.updateWorldMatrix(true, false);
+      this.pivotDrag = this.pivot.matrixWorld.clone().invert().multiply(v.root.matrixWorld);
+    });
+    this.stage.gizmo.addEventListener('mouseUp', () => {
+      this.pivotDrag = null;
+      const v = this.selected ? this.views.get(this.selected) : null;
+      if (v) this.placePivot(v);
+    });
     this.stage.gizmo.addEventListener('objectChange', () => this.gizmoMoved());
 
     this.buildToolbar();
@@ -391,11 +404,17 @@ export class App {
     this.placing = null;
     this.refreshAll();
   }
-  private placingPose(hit: NonNullable<ReturnType<Stage['pick']>>, spin: number, snap = false) {
+  private placingPose(hit: NonNullable<ReturnType<Stage['pick']>>, spin: number, snap = false, type?: PartType, params?: Record<string, any>) {
     const n = hit.normal.clone();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
     q.premultiply(new THREE.Quaternion().setFromAxisAngle(n, spin));
     const p = hit.point.clone();
+    if (type?.upright) {
+      // (it stands upright whatever it's put on: turned only about the vertical; under something, it
+      //  hangs below with its top against the face)
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), spin);
+      if (n.y < -0.5) p.y -= type.upright({ ...type.defaults, ...(params ?? {}) });
+    }
     if (hit.ground) {
       p.y = 0;
       if (snap && this.grid.snap) {
@@ -551,7 +570,7 @@ export class App {
     pl.ghost.root.visible = !!hit;
     if (!hit) return;
     if (hit.ground || !this.grid.snap) this.gridDots.visible = false;
-    const m = this.placingPose(hit, pl.spin, true);
+    const m = this.placingPose(hit, pl.spin, true, pl.type);
     m.decompose(pl.ghost.root.position, pl.ghost.root.quaternion, pl.ghost.root.scale);
     const onto = hit.ground ? 'the bench' : this.project.parts.find((p) => p.uid === hit.object.userData.uid)?.name;
     this.hint(`Click to put ${pl.type.name} on ${onto}${hit.ground ? '' : ' (it gets glued to it)'}  ·  R turn  ·  Shift-click keeps placing  ·  Esc stop`);
@@ -566,7 +585,7 @@ export class App {
       parent: null, pos: [0, 0, 0], rot: [0, 0, 0, 1],
     };
     const parent = pl.hit.ground ? null : { uid: pl.hit.object.userData.uid as string, body: pl.hit.object.userData.body as string };
-    this.setWorld(inst, this.placingPose(pl.hit, pl.spin, true), parent);
+    this.setWorld(inst, this.placingPose(pl.hit, pl.spin, true, pl.type, inst.params), parent);
     this.gridDots.visible = false;
     this.project.parts.push(inst);
     this.changed();
@@ -594,7 +613,7 @@ export class App {
       parent: null, pos: [0, 0, 0], rot: [0, 0, 0, 1], pinned: opts.pinned,
     };
     const hit = { point: new THREE.Vector3(...point), normal: new THREE.Vector3(...normal).normalize(), object: null as any, ground: false };
-    this.setWorld(inst, this.placingPose(hit, opts.spin ?? 0), opts.onto ?? null);
+    this.setWorld(inst, this.placingPose(hit, opts.spin ?? 0, false, type, inst.params), opts.onto ?? null);
     this.project.parts.push(inst);
     this.changed();
     return inst.uid;
@@ -611,6 +630,7 @@ export class App {
   select(uid: string | null) {
     this.selected = uid;
     this.gluing = null;
+    this.belting = null;
     if (uid) this.selectedWire = null;
     this.applySelection();
     this.refreshAll();
@@ -618,14 +638,85 @@ export class App {
   private applySelection() {
     for (const v of this.views.values()) setHighlight(v, v.inst.uid === this.selected);
     const v = this.selected ? this.views.get(this.selected) : null;
-    if (v && this.mode === 'build' && !this.wiring) this.stage.gizmo.attach(v.root);
-    else this.stage.gizmo.detach();
+    if (v && this.mode === 'build' && !this.wiring) {
+      this.placePivot(v);
+      this.stage.gizmo.attach(this.pivot);
+    } else this.stage.gizmo.detach();
     this.refreshMarkers();
+  }
+
+  // ------------------------------------------------------------------------------------ the pivot
+  /** where the move / turn arrows sit on the selected part: its centre (default), its centre of mass,
+   *  or its base (where it's glued on). The arrows move this handle; the part follows it. */
+  pivotMode: 'centre' | 'mass' | 'base' = (() => {
+    try { const m = localStorage.getItem('bench.pivot'); return m === 'mass' || m === 'base' ? m : 'centre'; } catch { return 'centre'; }
+  })();
+  setPivotMode(m: App['pivotMode']) {
+    this.pivotMode = m;
+    try { localStorage.setItem('bench.pivot', m); } catch { /* not remembered */ }
+    this.showGridState?.();
+    const v = this.selected ? this.views.get(this.selected) : null;
+    if (v) this.placePivot(v);
+    console.info(`[pivot] move and turn about the part's ${m === 'mass' ? 'centre of mass' : m}`);
+  }
+  pivot = new THREE.Object3D();
+  /** the handle's place when a drag began, and the part's (relative to it) */
+  private pivotDrag: THREE.Matrix4 | null = null;
+  /** A part's own pieces (not what's glued on it): their middle, or their middle weighted by weight. */
+  pivotPoint(v: PartView, mode = this.pivotMode) {
+    v.root.updateWorldMatrix(true, true);
+    if (mode === 'base') return new THREE.Vector3().setFromMatrixPosition(v.root.matrixWorld);
+    const all = new THREE.Box3(), b = new THREE.Box3();
+    const byBody = new Map<string, THREE.Box3>();
+    v.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || m.userData.uid !== v.inst.uid || !m.visible || m.userData.ghost) return;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      b.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld);
+      all.union(b);
+      const name = m.userData.body ?? 'body';
+      if (!byBody.has(name)) byBody.set(name, new THREE.Box3());
+      byBody.get(name)!.union(b);
+    });
+    if (all.isEmpty()) return new THREE.Vector3().setFromMatrixPosition(v.root.matrixWorld);
+    if (mode === 'centre') return all.getCenter(new THREE.Vector3());
+    // centre of mass: each body's middle, weighted by its weight
+    const c = new THREE.Vector3();
+    let total = 0;
+    for (const bd of v.build.bodies) {
+      const box = byBody.get(bd.name);
+      if (!box || box.isEmpty()) continue;
+      c.addScaledVector(box.getCenter(new THREE.Vector3()), bd.mass);
+      total += bd.mass;
+    }
+    return total > 0 ? c.divideScalar(total) : all.getCenter(new THREE.Vector3());
+  }
+  /** Put the handle on the part's pivot, turned as the part is (its arrows along the part's own axes). */
+  placePivot(v: PartView) {
+    if (!this.pivot.parent) this.stage.overlay.add(this.pivot);
+    this.pivot.position.copy(this.pivotPoint(v));
+    v.root.getWorldQuaternion(this.pivot.quaternion);
+    this.pivot.scale.set(1, 1, 1);
+    this.pivot.updateMatrixWorld(true);
+  }
+  /** The handle moved: the part goes with it, keeping where it was relative to it. */
+  private followPivot(v: PartView) {
+    if (!this.pivotDrag) return;
+    this.pivot.updateMatrixWorld(true);
+    const world = this.pivot.matrixWorld.clone().multiply(this.pivotDrag);
+    const parent = v.root.parent!;
+    parent.updateWorldMatrix(true, false);
+    const local = parent.matrixWorld.clone().invert().multiply(world);
+    const sc = new THREE.Vector3();
+    local.decompose(v.root.position, v.root.quaternion, sc);
+    v.root.updateMatrixWorld(true);
   }
   private gizmoMoved() {
     const v = this.selected ? this.views.get(this.selected) : null;
     if (!v) return;
+    if (this.stage.gizmo.dragging && this.pivotDrag) this.followPivot(v);
     if (this.stage.gizmo.dragging && this.stage.gizmo.mode === 'translate') this.snapMoved(v);
+    if (!this.stage.gizmo.dragging) this.placePivot(v); // (moved another way: R, undo...)
     this.stretchWires(v.inst.uid);
     v.inst.pos = v.root.position.toArray() as V3;
     v.inst.rot = v.root.quaternion.toArray() as Q4;
@@ -706,6 +797,7 @@ export class App {
     const name = this.nameOf(gone);
     this.project.parts = this.project.parts.filter((p) => p.uid !== gone);
     this.project.wires = this.project.wires.filter((w) => w.a.uid !== gone && w.b.uid !== gone);
+    if (this.project.belts) this.project.belts = this.project.belts.filter((b) => b.a !== gone && b.b !== gone);
     delete this.project.programs[gone];
     this.selected = null;
     this.changed();
@@ -749,6 +841,73 @@ export class App {
     this.changed();
     this.log(`${inst.name} is loose now`);
   }
+  /** a part's pulley (or gear) that a belt can go round: its mechanical description */
+  private beltWheel(uid: string) {
+    const v = this.views.get(uid);
+    return v?.build.mech?.find((m) => m.kind === 'pulley' || m.kind === 'gear') ?? null;
+  }
+  addBelt(a: string, b: string) {
+    if (!this.beltWheel(a) || !this.beltWheel(b)) {
+      this.log(`a belt goes between two pulleys: ${this.nameOf(b)} isn't one`, 'warn');
+      this.refreshInspector();
+      return null;
+    }
+    if ((this.project.belts ?? []).some((x) => (x.a === a && x.b === b) || (x.a === b && x.b === a))) {
+      this.log(`${this.nameOf(a)} and ${this.nameOf(b)} already have a belt`, 'warn');
+      return null;
+    }
+    this.snapshot();
+    const belt = { id: newUid(), a, b };
+    (this.project.belts ??= []).push(belt);
+    this.changed();
+    const ra = this.beltWheel(a)!.radius, rb = this.beltWheel(b)!.radius;
+    this.log(`belt from ${this.nameOf(a)} to ${this.nameOf(b)}: ${this.nameOf(b)} turns ${(ra / rb).toFixed(2)}x as fast, the same way`);
+    return belt.id;
+  }
+  removeBelt(id: string) {
+    this.snapshot();
+    this.project.belts = (this.project.belts ?? []).filter((x) => x.id !== id);
+    this.changed();
+  }
+  /** belts drawn round their pulleys, wherever the pulleys are now (built or running) */
+  private beltGroup = new THREE.Group();
+  private beltMeshes = new Map<string, { mesh: THREE.Mesh; key: string }>();
+  private drawBelts() {
+    if (!this.beltGroup.parent) this.stage.overlay.add(this.beltGroup);
+    const live = new Set<string>();
+    for (const bt of this.project.belts ?? []) {
+      const pa = this.beltPose(bt.a), pb = this.beltPose(bt.b);
+      if (!pa || !pb) continue;
+      live.add(bt.id);
+      const key = [...pa.c.toArray(), ...pb.c.toArray(), ...pa.n.toArray()].map((x) => x.toFixed(3)).join(',');
+      let m = this.beltMeshes.get(bt.id);
+      if (m && m.key === key) continue;
+      const pts = beltPath(pa.c, pa.r, pb.c, pb.r, pa.n);
+      const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0), pts.length * 2, 0.08, 6, true);
+      if (!m) {
+        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: bt.color ?? '#202226', roughness: 0.8 }));
+        this.beltGroup.add(mesh);
+        m = { mesh, key };
+        this.beltMeshes.set(bt.id, m);
+      } else {
+        m.mesh.geometry.dispose();
+        m.mesh.geometry = geo;
+        m.key = key;
+      }
+    }
+    for (const [id, m] of this.beltMeshes) if (!live.has(id)) {
+      m.mesh.geometry.dispose();
+      this.beltGroup.remove(m.mesh);
+      this.beltMeshes.delete(id);
+    }
+  }
+  private beltPose(uid: string) {
+    const v = this.views.get(uid), d = this.beltWheel(uid);
+    const o = d && v?.bodies.get(d.body);
+    if (!d || !o) return null;
+    o.updateWorldMatrix(true, false);
+    return { c: new THREE.Vector3(...d.at).applyMatrix4(o.matrixWorld), n: new THREE.Vector3(...d.axis).transformDirection(o.matrixWorld).normalize(), r: d.radius };
+  }
   private glueTo(targetUid: string, body: string) {
     const inst = this.instOf(this.gluing)!;
     this.gluing = null;
@@ -790,7 +949,7 @@ export class App {
     for (const v of this.views.values()) setHighlight(v, false);
     try {
       const views = parentFirst(this.project.parts).map((p) => this.views.get(p.uid)!);
-      this.sim = new Sim(this.R, views, this.stage.runRoot, (m, l) => this.log(m, l));
+      this.sim = new Sim(this.R, views, this.stage.runRoot, (m, l) => this.log(m, l), this.project.belts ?? []);
       if ((this.project.gravity ?? 1) !== 1) this.sim.setGravity(this.project.gravity ?? 1);
       for (const w of this.project.wires) {
         const va = this.views.get(w.a.uid), vb = this.views.get(w.b.uid);
@@ -903,6 +1062,7 @@ export class App {
     if (this.stage.camera.up.y !== 1) this.stage.camera.up.set(0, 1, 0);
     this.wires.sync(broken?.size ? this.project.wires.filter((w) => !broken.has(w.id)) : this.project.wires, this.views, this.selectedWire);
     if (Math.floor(t / 200) !== Math.floor((t - dt * 1000) / 200)) this.refreshReadouts();
+    if (this.project.belts?.length || this.beltMeshes.size) this.drawBelts();
     this.stage.render();
     requestAnimationFrame((x) => this.frame(x));
   }
@@ -1182,6 +1342,13 @@ export class App {
         return;
       }
       if (this.selectedWire) this.selectedWire = null;
+      if (this.belting) {
+        const from = this.belting;
+        this.belting = null;
+        if (hit && hit.object.userData.uid !== from) this.addBelt(from, hit.object.userData.uid);
+        else this.refreshInspector();
+        return;
+      }
       if (this.gluing) {
         if (hit && hit.object.userData.uid !== this.gluing) this.glueTo(hit.object.userData.uid, hit.object.userData.body);
         else {
@@ -1462,9 +1629,15 @@ export class App {
     const sizeSel = el('select', { className: 'tb-select' }) as HTMLSelectElement;
     for (const [v, label] of [[0.1, '1 mm'], [0.25, '2.5 mm'], [0.254, '0.1 inch (headers)'], [0.5, '5 mm'], [1, '1 cm'], [2, '2 cm'], [5, '5 cm']] as [number, string][])
       sizeSel.append(el('option', { value: String(v), textContent: label }));
+    const pivotSel = el('select', { className: 'tb-select', title: 'Where the move and turn arrows sit on the selected part' },
+      el('option', { value: 'centre', textContent: 'its centre' }),
+      el('option', { value: 'mass', textContent: 'its centre of mass' }),
+      el('option', { value: 'base', textContent: 'its base (where it is glued)' })) as HTMLSelectElement;
+    pivotSel.onchange = () => this.setPivotMode(pivotSel.value as App['pivotMode']);
     const pop = el('div', { className: 'tb-pop', hidden: true },
       el('label', { className: 'tb-row' }, snapBox, el('span', { textContent: 'Snap to grid' }), sizeSel),
       el('label', { className: 'tb-row' }, fitBox, el('span', { textContent: 'Parts get their own grid' })),
+      el('label', { className: 'tb-row' }, el('span', { textContent: 'Move and turn about' }), pivotSel),
       el('div', { className: 'tb-note', textContent: "A part's own grid fits it: its sides are divided evenly, so odd sizes still have their edges and middle on the grid. Blue dots show it while you place or move something on the part. G turns snapping on and off." }));
     this.showGridState = () => {
       gridBtn.textContent = this.grid.snap ? `Grid: ${sizeSel.querySelector<HTMLOptionElement>(`option[value="${this.grid.size}"]`)?.textContent ?? `${this.grid.size} cm`}` : 'Grid: off';
@@ -1473,6 +1646,7 @@ export class App {
       fitBox.checked = this.grid.fit;
       fitBox.disabled = !this.grid.snap;
       sizeSel.value = String(this.grid.size);
+      pivotSel.value = this.pivotMode;
       sizeSel.disabled = !this.grid.snap;
     };
     snapBox.onchange = () => this.setGrid({ snap: snapBox.checked });
@@ -1618,6 +1792,7 @@ export class App {
     document.title = `Bench Workshop - ${this.project.name}${this.dirty ? ' *' : ''}`;
     if (this.placing) this.hint(`Click on the bench or a part to put ${this.placing.type.name} there  ·  R turn  ·  Shift-click keeps placing  ·  Esc stop`);
     else if (this.gluing) this.hint(`Click the part to glue ${this.nameOf(this.gluing)} to  ·  click empty space to cancel`);
+    else if (this.belting) this.hint(`Click the pulley the belt from ${this.nameOf(this.belting)} goes to  ·  click empty space to cancel`);
     else if (this.wiring) this.hint(this.wireStart ? `From ${this.pinLabel(this.wireStart)}: click the pin to wire it to  ·  Esc cancel` : 'Wire tool: click a pin, then another pin  ·  C or Esc to leave');
     else if (m !== 'build') this.hint('Drag a part to push it  ·  click a button to press it  ·  the panel on the right shows what each part is doing  ·  Esc back to building');
     else if (!this.project.parts.length) this.hint('Pick a part on the left, then click on the bench to place it  ·  or open one of the Examples');
@@ -1726,6 +1901,16 @@ export class App {
       el('button', { textContent: this.gluing ? 'Click a part...' : 'Glue to...', className: this.gluing ? 'active' : '', onclick: () => { this.gluing = this.gluing ? null : inst.uid; this.refreshAll(); } }),
       el('button', { textContent: 'Unglue', disabled: !inst.parent, onclick: () => this.unglueSelected() })));
     box.append(glue);
+    if (this.beltWheel(inst.uid)) {
+      const belts = (this.project.belts ?? []).filter((b) => b.a === inst.uid || b.b === inst.uid);
+      const bx = el('div', { className: 'box' }, el('div', { textContent: belts.length ? 'Belts:' : 'No belt yet.' }));
+      for (const b of belts) {
+        const other = b.a === inst.uid ? b.b : b.a;
+        bx.append(el('div', { className: 'row' }, el('span', { textContent: `to ${this.nameOf(other)}`, style: 'flex:1' }), el('button', { textContent: 'Remove', onclick: () => this.removeBelt(b.id) })));
+      }
+      bx.append(el('div', { className: 'row' }, el('button', { textContent: this.belting ? 'Click a pulley...' : 'Belt to...', className: this.belting ? 'active' : '', title: 'Put a belt from this pulley round another one: they turn together', onclick: () => { this.belting = this.belting ? null : inst.uid; this.gluing = null; this.refreshAll(); } })));
+      box.append(bx);
+    }
     const pos = el('div', { className: 'note' });
     this.readouts.push(() => {
       const v = this.views.get(inst.uid);
@@ -1844,9 +2029,30 @@ export class App {
     this.toast('Left: parts. Click one, then click where it goes (on the bench or on another part: it gets glued there). ' +
       'Wire (C): click a pin, then another. Program: write the selected board\'s code. ' +
       'Finding a part: type in the search box at the top of the parts list (Ctrl+F; Enter picks the first one). The Libraries window has its own search. ' +
+      'Mechanics: gears mesh when their teeth meet (by tooth count); pulleys turn together through a belt (select one, Belt to...); an Axle (free) holds gears and pulleys; a Tank track has its own motor; mecanum and omni wheels drive any way. ' +
+      'The move / turn arrows sit at the centre of the selected part (Grid menu: or its centre of mass, or its base). ' +
       'Your own designs: My boards > Import 3D model (.stl) makes a part of it (its look, its weight, and a solid shape that keeps holes and hollows open). ' +
       'Grid (toolbar, G): parts snap to it when placed or moved; a part you put things on gets its own grid that fits it (odd sizes too), shown as blue dots. UI (toolbar): how big the buttons and text are; auto follows your display settings and screen. ' +
       'Your own boards: My boards (bottom of the parts list) > Import KiCad board or Make a part. Libraries: add-on parts to download. ' +
       'Drag with the left mouse to turn the view, right to slide, wheel to zoom. Run starts everything; while running, drag a part to pick it up and carry it (while holding: W A S D and R / F move the camera and what you hold comes along, right-drag turns the camera, Q / E turn it, the wheel sets the grip; let go to drop or throw it); hold Shift to shove things with a small ball. Click buttons to press them. Pin graph shows pins over time; Plot in a serial monitor graphs printed numbers.', 'info');
   }
+}
+
+/** The loop of a belt round two pulleys (centres ca, cb, radii ra, rb, axle n): round the far side of
+ *  each, joined by the two straight runs that touch both. */
+function beltPath(ca: THREE.Vector3, ra: number, cb: THREE.Vector3, rb: number, n: THREE.Vector3) {
+  const d = cb.clone().sub(ca);
+  d.addScaledVector(n, -d.dot(n)); // (in the first pulley's plane)
+  const L = Math.max(1e-3, d.length());
+  const u = d.divideScalar(L), w = n.clone().cross(u).normalize();
+  const s = Math.max(-0.99, Math.min(0.99, (ra - rb) / L));
+  const phi = Math.asin(s);
+  const pts: THREE.Vector3[] = [];
+  const at = (c: THREE.Vector3, r: number, a: number) => c.clone().addScaledVector(u, r * Math.cos(a)).addScaledVector(w, r * Math.sin(a));
+  // where the straight runs touch: at angle pi/2 - phi on one side, -(pi/2 - phi) on the other
+  const t1 = Math.PI / 2 - phi, t2 = -(Math.PI / 2 - phi);
+  const N = 20;
+  for (let i = 0; i <= N; i++) pts.push(at(ca, ra, t1 + ((2 * Math.PI - (t1 - t2)) * i) / N)); // round the back of A
+  for (let i = 0; i <= N; i++) pts.push(at(cb, rb, t2 + ((t1 - t2) * i) / N)); // round the front of B
+  return pts;
 }

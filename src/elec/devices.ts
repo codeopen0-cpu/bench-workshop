@@ -33,7 +33,7 @@ const wifiLine = (i: { status: number; ip: string; ap: string | null; server: { 
 export const sketchLibraries = {
   resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[] } => ({ libs: [], classes: [], missing: includes }),
 };
-const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|avr\/.*)\.h$/;
+const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|avr\/.*)\.h$/;
 export const lensMeshes = (v: PartView, flag: string) => {
   const out: THREE.Mesh[] = [];
   for (const b of v.bodies.values()) b.traverse((m) => m.userData[flag] && (m as THREE.Mesh).isMesh && out.push(m as THREE.Mesh));
@@ -330,6 +330,13 @@ export interface BoardSpec {
   wifi?: boolean;
   /** its WiFi.begin waits until connected (UNO R4 WiFi style) instead of returning at once (ESP32) */
   wifiWaits?: boolean;
+  /** its analog inputs: bits analogRead starts with, and the voltage that reads full scale
+   *  (default 12 bits of 3.3 V; an Arduino Nano: 10 bits of 5 V) */
+  adc?: { bits: number; vref: number };
+  /** the pins analogWrite can dim (default: all); on the others it just switches */
+  pwmPins?: number[];
+  /** its on-board LED lights when the pin is LOW (an ESP8266's, an ESP32-C3 SuperMini's) */
+  ledActiveLow?: boolean;
 }
 
 /** A board running a program (in its own thread). Drives its pins from the program, feeds inputs back. */
@@ -349,7 +356,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const includes = [...code.matchAll(/^\s*(?:\/\/\s*)?#\s*include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]).filter((x) => !BUILTIN_INCLUDES.test(x));
     const libs = sketchLibraries.resolve(includes);
     for (const m of libs.missing) c.warnOnce(`inc:${uid}:${m}`, `${name(v)}'s program includes ${m}, which no installed library has: find it under Libraries`, 'bad');
-    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences'], { ARDUINO: 10819, ...spec.defines });
+    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences'], { ARDUINO: 10819, ...spec.defines });
     else code = code.replace(/^\s*#\s*include.*$/gm, '');
     const constants: Record<string, number> = { ...spec.defines, ...spec.constants };
     for (const [id, n] of Object.entries(spec.pins)) if (/^[A-Za-z_]\w*$/.test(id) && !/^GP\d+$/.test(id)) constants[id] = n;
@@ -374,7 +381,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       },
       warn: (msg) => c.warnOnce(`w:${uid}:${msg}`, `${name(v)}: ${msg}`),
       state: (s) => s === 'loop' && hooks.log(`${name(v)}: program running (setup() done)`),
-    }, !!spec.wifi, !!spec.wifiWaits);
+    }, !!spec.wifi, !!spec.wifiWaits, { adcBits: spec.adc?.bits, pwmPins: spec.pwmPins });
     running = true;
     wifiShown = '';
   };
@@ -523,7 +530,8 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       }
       if (spec.builtinLed !== undefined) {
         const n = spec.builtinLed;
-        glow(ledMeshes, sh.mode[n] === MODE.OUTPUT ? (sh.hz[n] > 0 ? sh.duty[n] : sh.out[n]) : 0);
+        const lit = sh.mode[n] === MODE.OUTPUT ? (sh.hz[n] > 0 ? sh.duty[n] : sh.out[n]) : spec.ledActiveLow ? 1 : 0;
+        glow(ledMeshes, spec.ledActiveLow ? 1 - lit : lit);
       }
       spec.onStep?.(sh, c, 'drive');
     },
@@ -546,7 +554,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
           }
         }
         sh.inp[n] = nv;
-        if (spec.analog.includes(id)) sh.analog[n] = Math.round(Math.max(0, Math.min(1, c.avg(uid, id) / 3.3)) * 4095);
+        if (spec.analog.includes(id)) sh.analog[n] = Math.round(Math.max(0, Math.min(1, c.avg(uid, id) / (spec.adc?.vref ?? 3.3))) * 4095);
       }
     },
     status: () => [

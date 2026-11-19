@@ -160,8 +160,15 @@ export class LibrariesWindow {
     if (path) this.host.log(`saved ${lib.name} as ${path}: anyone can install it with Libraries > Install from file`);
   }
 
+  /** the tab the list was last drawn for (redrawing the same one keeps its scroll place) */
+  private drawnTab = '';
   private render() {
     if (!this.root) return;
+    // where the list was scrolled to: an install (or an update, or Remove) redraws the window, and
+    // the list should stay where you were, not jump back to the top
+    const prev = this.root.querySelector<HTMLElement>('.lib-body');
+    const keepScroll = prev && this.drawnTab === this.tab ? prev.scrollTop : 0;
+    const hadFocus = document.activeElement?.classList.contains('lib-search') || !prev;
     const tabBtn = (t: typeof this.tab, label: string) =>
       el('button', { className: `tab ${this.tab === t ? 'active' : ''}`, textContent: label, onclick: () => { this.tab = t; this.render(); } });
     const search = el('input', { type: 'search', placeholder: 'Search libraries', value: this.filter, className: 'lib-search' }) as HTMLInputElement;
@@ -195,7 +202,10 @@ export class LibrariesWindow {
         } })));
     this.root.replaceChildren(win);
     this.renderBody(body);
-    search.focus(); // (open it and type: the search is ready)
+    body.scrollTop = keepScroll;
+    this.drawnTab = this.tab;
+    // (open it and type: the search is ready; but a redraw after clicking Install leaves focus alone)
+    if (hadFocus) search.focus({ preventScroll: true });
   }
 
   private renderBody(body: HTMLElement) {

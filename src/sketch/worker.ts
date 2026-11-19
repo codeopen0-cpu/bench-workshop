@@ -13,6 +13,10 @@ interface Start {
   libs: { name: string; code: string; exports: string[] }[]; // #include'd library code
   wifi?: boolean; // the board has Wi-Fi (WiFi, WebServer)
   wifiWaits?: boolean; // its WiFi.begin waits until connected (UNO R4 WiFi / WiFiS3)
+  /** analogRead's bits at start (an Arduino Nano: 10, 0-1023; an ESP32: 12, 0-4095) */
+  adcBits?: number;
+  /** the pins analogWrite can really dim (an Arduino Nano: 3 5 6 9 10 11); others just switch */
+  pwmPins?: number[];
 }
 
 self.onmessage = (e: MessageEvent<Start>) => {
@@ -135,6 +139,7 @@ function run(init: Start) {
   // ------------------------------------------------------------------------------- the Arduino API
   const C = init.constants;
   let pwmMax = 255, pwmHz = 1000;
+  let adcBits = init.adcBits ?? 12;
   const api: Record<string, any> = {
     HIGH: 1, LOW: 0, INPUT: MODE.INPUT, OUTPUT: MODE.OUTPUT, INPUT_PULLUP: MODE.INPUT_PULLUP, INPUT_PULLDOWN: MODE.INPUT_PULLDOWN,
     true: undefined, // (placeholders keep the names list tidy; removed below)
@@ -163,10 +168,18 @@ function run(init: Start) {
     analogRead(p: number) {
       pin(p, 'analogRead');
       if (!init.analogPins.includes(p)) warnOnce(`ar${p}`, `analogRead(${p}): pin ${p} has no analog input (use one of: ${init.analogPins.join(', ')})`);
-      return sh.analog[p];
+      // (shared as 12 bits of the board's reference voltage; the program reads its own resolution)
+      return adcBits === 12 ? sh.analog[p] : Math.round((sh.analog[p] * (2 ** adcBits - 1)) / 4095);
     },
     analogWrite(p: number, v: number) {
       pin(p, 'analogWrite');
+      if (init.pwmPins && !init.pwmPins.includes(p)) {
+        // (a pin without PWM: the real board switches it fully on from half way up, else off)
+        warnOnce(`pwm${p}`, `analogWrite(${p}): pin ${p} can't dim on this board (PWM pins: ${init.pwmPins.join(', ')}); it just switches on or off`);
+        api.digitalWrite(p, v >= pwmMax / 2 ? 1 : 0);
+        sh.mode[p] = MODE.OUTPUT;
+        return;
+      }
       sh.mode[p] = MODE.OUTPUT;
       const d = Math.max(0, Math.min(1, v / pwmMax));
       sh.duty[p] = d;
@@ -179,7 +192,7 @@ function run(init: Start) {
     analogWriteResolution(bits: number) { pwmMax = 2 ** bits - 1; },
     analogWriteRange(range: number) { pwmMax = range; },
     analogWriteFreq(hz: number) { pwmHz = hz; },
-    analogReadResolution() { /* always 12-bit: 0-4095 */ },
+    analogReadResolution(bits: number) { adcBits = Math.max(1, Math.min(16, Math.round(Number(bits) || 10))); },
     tone(p: number, hz: number, ms?: number) {
       pin(p, 'tone');
       sh.mode[p] = MODE.OUTPUT;
@@ -562,6 +575,15 @@ function run(init: Start) {
   Object.assign(api, {
     WiFiServer, WiFiClient,
     WiFi, WebServer, IPAddress, MDNS,
+    // (an ESP8266's names for the same things: ESP8266WiFi.h, ESP8266WebServer.h, ESP8266mDNS.h)
+    ESP8266WebServer: WebServer,
+    // (the chip's own odds and ends, as sketches print them)
+    ESP: {
+      getChipId: () => 0x3c7a1d, getEfuseMac: () => 0x104cb3286f24, getFreeHeap: () => 210000, getHeapSize: () => 327680,
+      getChipModel: () => 'ESP32', getChipRevision: () => 3, getCpuFreqMHz: () => 240, getFlashChipSize: () => 4194304, getSdkVersion: () => 'v5.1',
+      restart: () => warnOnce('esprestart', 'ESP.restart(): on the bench the program carries on (press Stop and Run to restart it)'),
+      deepSleep: () => warnOnce('espsleep', 'ESP.deepSleep(): on the bench the program carries on'),
+    },
     WL_IDLE_STATUS: 0, WL_NO_SSID_AVAIL: 1, WL_SCAN_COMPLETED: 2, WL_CONNECTED: 3, WL_CONNECT_FAILED: 4, WL_CONNECTION_LOST: 5, WL_DISCONNECTED: 6,
     WIFI_OFF: 0, WIFI_STA: 1, WIFI_AP: 2, WIFI_AP_STA: 3,
     HTTP_ANY: 255, HTTP_DELETE: 0, HTTP_GET: 1, HTTP_HEAD: 2, HTTP_POST: 3, HTTP_PUT: 4, HTTP_PATCH: 28,
@@ -721,11 +743,12 @@ function run(init: Start) {
   const serialPin = (k: string) => (typeof C[k] === 'number' ? C[k] : -1);
   const Serial1 = new HardwareSerial(serialPin('__RX1'), serialPin('__TX1'), 'Serial1');
   const Serial2 = new HardwareSerial(serialPin('__RX2'), serialPin('__TX2'), 'Serial2');
+  const Serial3 = new HardwareSerial(serialPin('__RX3'), serialPin('__TX3'), 'Serial3'); // (an Arduino Mega has a third)
   /** SoftwareSerial bt(rxPin, txPin): a serial port on any two pins */
   class SoftwareSerial extends HardwareSerial {
     constructor(rx: number, tx: number) { super(rx, tx, 'SoftwareSerial'); }
   }
-  Object.assign(api, { Serial1, Serial2, SoftwareSerial, HardwareSerial, SERIAL_8N1: 0x800001c, SERIAL_8E1: 0x800001e, linkSend, linkReceive });
+  Object.assign(api, { Serial1, Serial2, Serial3, SoftwareSerial, HardwareSerial, SERIAL_8N1: 0x800001c, SERIAL_8E1: 0x800001e, linkSend, linkReceive });
 
   // ------------------------------------------------------------------------------- SPI
   // The board's SPI pins (SCK, MOSI, MISO) reach every SPI part wired to them; the one whose CS pin

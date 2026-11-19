@@ -21,6 +21,9 @@ export interface ColliderDef {
   restitution?: number; // default 0.1
   /** a touch-sensing surface (a library part's "touch"): the run reports what presses on it */
   tag?: string;
+  /** its friction is the lower of its own and what it touches (a mecanum wheel's rollers: 0, the
+   *  sim adds the grip they really have, one way only) */
+  frictionMin?: boolean;
 }
 
 /** One rigid piece of a part. A servo has two: the case and the horn (joined by a motor). */
@@ -106,11 +109,32 @@ export interface PortDef {
   pins: [string, string, string, string]; // pin ids for GND, SDA, SCL, VB
 }
 
+/** Something on a body that works with other parts mechanically (see sim.ts, mechanics):
+ *  gear: meshes with any gear whose teeth reach it (turning the other way, by tooth count);
+ *  pulley: turns with the pulleys its belts join (the same way, by size);
+ *  chain: turns with the other wheels of the same chain in this part (a tank track's wheels);
+ *  mecanum / omni: a wheel of rollers that grips only one way (the rest of the time it slides). */
+export interface MechDef {
+  kind: 'gear' | 'pulley' | 'chain' | 'mecanum' | 'omni';
+  body: string;
+  /** its centre and axle, in the body's frame */
+  at: V3;
+  axis: V3;
+  /** pitch radius (gears), belt radius (pulleys), wheel radius (chains, rollers) */
+  radius: number;
+  teeth?: number;
+  /** a gear's thickness (it meshes only with gears beside it, not above it), cm */
+  width?: number;
+  /** chain: which chain in the part; mecanum: which way its rollers lean, 1 or -1 */
+  group?: number;
+}
+
 export interface PartBuild {
   bodies: BodyDef[];
   joints: JointDef[];
   pins?: PinDef[];
   ports?: PortDef[];
+  mech?: MechDef[];
 }
 
 export interface PartType {
@@ -124,6 +148,10 @@ export interface PartType {
   build(p: Record<string, any>): PartBuild;
   /** Which body is glued to whatever the part is placed on (default: the first). */
   mountBody?: string;
+  /** It always stands upright (a tank track): placed on any face it keeps its Y up, turned only about
+   *  the vertical; on a face looking down (a chassis' underside) it hangs below it, its top (this
+   *  high, cm) against the face. */
+  upright?: (p: Record<string, any>) => number;
   /** Can be programmed: 'sketch' (Arduino-style program in the app) or 'rp2040' (also real .uf2 firmware). */
   programmable?: 'sketch' | 'rp2040';
 }

@@ -50,6 +50,14 @@ export interface Project {
   room?: number;
   /** gravity as a share of Earth's (default 1): 0.165 the Moon, 0.1 floaty */
   gravity?: number;
+  /** belts between pulleys (part uids): they turn together, the same way, by their sizes */
+  belts?: Belt[];
+}
+export interface Belt {
+  id: string;
+  a: string;
+  b: string;
+  color?: string;
 }
 
 export const newProject = (name = 'Untitled'): Project => ({ format: 'bench-workshop', version: 1, name, parts: [], wires: [], programs: {}, boards: [] });
@@ -115,7 +123,8 @@ export function validate(data: any): { project: Project | null; problems: string
     project: { format: 'bench-workshop', version: 1, name: String(data.name ?? 'Untitled'), parts, wires, programs, boards: Array.isArray(data.boards) ? data.boards : [],
       wifi: data.wifi && typeof data.wifi.ssid === 'string' ? { ssid: String(data.wifi.ssid).slice(0, 32), pass: String(data.wifi.pass ?? '').slice(0, 63) } : undefined,
       room: typeof data.room === 'number' && data.room >= 0 && data.room <= 1 ? data.room : undefined,
-      gravity: typeof data.gravity === 'number' && data.gravity >= 0 && data.gravity <= 3 ? data.gravity : undefined },
+      gravity: typeof data.gravity === 'number' && data.gravity >= 0 && data.gravity <= 3 ? data.gravity : undefined,
+      belts: Array.isArray(data.belts) ? data.belts.filter((b: any) => b && uids.has(b.a) && uids.has(b.b) && b.a !== b.b).map((b: any) => ({ id: String(b.id || newUid()), a: String(b.a), b: String(b.b), color: typeof b.color === 'string' ? b.color : undefined })) : undefined },
     problems,
   };
 }
