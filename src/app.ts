@@ -2152,7 +2152,7 @@ export class App {
       'Your own designs: My boards > Import 3D model (.stl) makes a part of it (its look, its weight, and a solid shape that keeps holes and hollows open). ' +
       'Grid (toolbar, G): parts snap to it when placed or moved; a part you put things on gets its own grid that fits it (odd sizes too), shown as blue dots. UI (toolbar): how big the buttons and text are; auto follows your display settings and screen. ' +
       'Your own boards: My boards (bottom of the parts list) > Import KiCad board or Make a part. Libraries: add-on parts to download. ' +
-      'Drag with the left mouse to turn the view, right to slide, wheel to zoom. Run starts everything; while running, drag a part to pick it up and carry it (while holding: W A S D and R / F move the camera and what you hold comes along, right-drag turns the camera, Q / E turn it, the wheel sets the grip; let go to drop or throw it); hold Shift to shove things with a small ball. Click buttons to press them. Pin graph shows pins over time; Plot in a serial monitor graphs printed numbers.', 'info');
+      'Drag with the left mouse to turn the view, right to slide, wheel to move forward and back the way you look (Ctrl + wheel: zoom).Run starts everything; while running, drag a part to pick it up and carry it (while holding: W A S D and R / F move the camera and what you hold comes along, right-drag turns the camera, Q / E turn it, the wheel sets the grip; let go to drop or throw it); hold Shift to shove things with a small ball. Click buttons to press them. Pin graph shows pins over time; Plot in a serial monitor graphs printed numbers.', 'info');
   }
 }
 

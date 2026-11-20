@@ -36,6 +36,12 @@ export class Stage {
     this.orbit.maxPolarAngle = Math.PI * 0.495;
     this.orbit.minDistance = 4;
     this.orbit.maxDistance = 1500;
+    // The wheel moves the camera forward and back the way it looks (camera and the point it turns
+    // round together), instead of zooming towards that point: a zoom slows down as it gets close and
+    // never goes past it. Ctrl + wheel still zooms the old way. (app.ts takes the wheel first while
+    // something is held or pushed.)
+    this.orbit.enableZoom = false;
+    this.renderer.domElement.addEventListener('wheel', (ev) => this.onWheel(ev), { passive: false });
 
     this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
     this.gizmo.setSize(0.8);
@@ -87,7 +93,64 @@ export class Stage {
     this.camera.updateProjectionMatrix();
   }
 
+  /** How far the wheel still has to move the camera (cm, + forward): spent over a few frames. */
+  private flyLeft = 0;
+  private flyLog = { notches: 0, cm: 0, went: 0, blocked: false };
+
+  private onWheel(ev: WheelEvent) {
+    ev.preventDefault();
+    // (a mouse notch is about 100; a touchpad sends many small ones; pages and lines too)
+    const px = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaMode === 2 ? ev.deltaY * 800 : ev.deltaY;
+    const notches = -Math.max(-3, Math.min(3, px / 100));
+    if (!notches) return;
+    if (ev.ctrlKey) {
+      // the old zoom: towards the point it turns round
+      const off = this.camera.position.clone().sub(this.orbit.target);
+      const d = Math.max(this.orbit.minDistance, Math.min(this.orbit.maxDistance, off.length() * Math.pow(0.88, notches)));
+      this.camera.position.copy(this.orbit.target).addScaledVector(off.normalize(), d);
+      return;
+    }
+    // A step: a share of how far away what's under the mouse is (so it's fine near a part and quick
+    // across the room), never less than 3 cm (it never crawls) nor more than 150.
+    const hit = this.pick(ev, [this.partsRoot, this.runRoot], true);
+    const far = hit ? hit.point.distanceTo(this.camera.position) : this.camera.position.distanceTo(this.orbit.target);
+    const step = Math.max(3, Math.min(150, far * 0.15));
+    this.flyLeft += notches * step;
+    this.flyLog.notches += notches;
+    this.flyLog.cm += notches * step;
+  }
+
+  /** Spend some of the wheel's move: camera and target along the way it looks. */
+  private fly() {
+    if (Math.abs(this.flyLeft) < 0.01) {
+      this.flyLeft = 0;
+      if (this.flyLog.notches) {
+        // (once it has got there: where it ended up)
+        const p = this.camera.position, l = this.flyLog;
+        console.info(`[camera] wheel: ${l.notches.toFixed(1)} notches asked ${l.cm.toFixed(1)} cm ${l.cm >= 0 ? 'forward' : 'back'}, it went ${l.went.toFixed(1)} cm${l.blocked ? ' (stopped above the bench)' : ''}; now at (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}), ${p.distanceTo(this.orbit.target).toFixed(1)} cm from the point it turns round`);
+        this.flyLog = { notches: 0, cm: 0, went: 0, blocked: false };
+      }
+      return;
+    }
+    let d = this.flyLeft * 0.3;
+    if (Math.abs(d) < 0.05) d = this.flyLeft;
+    const fwd = new THREE.Vector3();
+    this.camera.getWorldDirection(fwd);
+    // (not through the bench: stop 1 cm above it)
+    const y = this.camera.position.y + fwd.y * d;
+    if (y < 1 && fwd.y * d < 0) {
+      d = fwd.y ? (1 - this.camera.position.y) / fwd.y : 0;
+      this.flyLeft = 0;
+      this.flyLog.blocked = true;
+    } else this.flyLeft -= d;
+    if (!d || !isFinite(d)) return;
+    this.flyLog.went += d;
+    this.camera.position.addScaledVector(fwd, d);
+    this.orbit.target.addScaledVector(fwd, d);
+  }
+
   render() {
+    this.fly();
     this.orbit.update();
     this.renderer.render(this.scene, this.camera);
   }
