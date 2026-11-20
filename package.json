@@ -1,7 +1,7 @@
 {
   "name": "bench-workshop",
   "private": true,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Bench Workshop: a 3D workbench with physics to build, wire, program and test boards and the things they drive.",
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "tauri": "tauri",
     "app": "tauri dev",
-    "release": "tauri build"
+    "release": "tauri build",
+    "examples": "node tools/check_examples.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",

@@ -1,0 +1,56 @@
+# The Linux version: when a release is published (the Windows installer goes up from the maker's
+# PC), this builds the same source for Linux and adds a .deb and an AppImage to that release.
+# It can also be started by hand for an existing release (Actions > Linux build > Run workflow).
+# Linux builds don't update themselves yet: the app says when a newer version is out and links here.
+name: Linux build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to build for (for example v0.14.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: System libraries (WebKitGTK and friends)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Build (.deb and AppImage)
+        run: npx tauri build --bundles deb,appimage --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Add them to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la src-tauri/target/release/bundle/deb src-tauri/target/release/bundle/appimage
+          gh release upload "$TAG" src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage --clobber --repo "$GITHUB_REPOSITORY"
+          echo "added to $TAG:" && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'

@@ -17,6 +17,8 @@ interface Start {
   adcBits?: number;
   /** the pins analogWrite can really dim (an Arduino Nano: 3 5 6 9 10 11); others just switch */
   pwmPins?: number[];
+  /** false: every wait and bus transfer takes a whole simulation step (before 0.14; for comparing) */
+  fineTime?: boolean;
 }
 
 self.onmessage = (e: MessageEvent<Start>) => {
@@ -43,7 +45,18 @@ function seal() {
 function run(init: Start) {
   const sh = new Shared(init.sab);
   const ctl = sh.ctl;
-  const now = () => sh.f64[0];
+  // The program's own clock (ms). It runs with the simulation's time, and on from there by what bus
+  // transfers and short waits really take: a program may get up to one simulation step ahead before
+  // it has to wait for the simulation (so a 10 us wait or a 0.4 ms I2C read costs that, not a step).
+  // (fineTime false: the old way, every wait and bus transfer a whole step; for comparing)
+  const fine = init.fineTime !== false;
+  let local = 0;
+  const now = () => {
+    const t = sh.f64[0];
+    return t > local ? (local = t) : local;
+  };
+  const stepMs = () => (!fine ? 0 : sh.f64[1] > 0 ? sh.f64[1] : 1000 / 240);
+  Atomics.store(ctl, CTL.PARK, -1);
   let serialOut = '';
   let lastFlush = 0;
   const flush = () => {
@@ -103,13 +116,27 @@ function run(init: Start) {
     if (now() - lastFlush > 30) flush();
     timed();
     whileWaiting();
-    while (now() < ms) {
+    if (ms > now()) local = ms; // (its clock reads ms when the wait is over)
+    for (;;) {
       const s = Atomics.load(ctl, CTL.STEP);
-      if (now() >= ms) break;
+      if (sh.f64[0] + stepMs() >= ms - 1e-9) break; // within a step of the simulation: go on
+      // further ahead: sleep until the simulation catches up (PARK tells it which step we sleep on,
+      // so it doesn't wait for a request that won't come this step)
+      Atomics.store(ctl, CTL.PARK, s);
       Atomics.wait(ctl, CTL.STEP, s, 250);
+      Atomics.store(ctl, CTL.PARK, -1);
       timed();
       whileWaiting();
     }
+  };
+  /** time a transfer takes on the wire (the program's clock moves on by it) */
+  const spend = (ms: number) => { if (fine) waitUntil(now() + ms); };
+  /** a microsecond for reading the clock (waits only if that takes it a step ahead) */
+  const clockRead = () => {
+    if (!fine) return;
+    const t = now() + 0.001;
+    if (sh.f64[0] + stepMs() < t) waitUntil(t);
+    else local = t;
   };
   const request = (type: number, a0 = 0, a1 = 0, a2 = 0, data?: number[]) => {
     if (data) sh.req.set(data.slice(0, 512));
@@ -224,8 +251,10 @@ function run(init: Start) {
     NAN: NaN, INFINITY: Infinity,
     isnan: (x: number) => Number.isNaN(Number(x)),
     isinf: (x: number) => Math.abs(Number(x)) === Infinity,
-    millis: () => { timed(); return Math.floor(now()); },
-    micros: () => { timed(); return Math.floor(now() * 1000); },
+    // (reading the clock takes the chip about a microsecond: a loop that waits by watching micros()
+    //  lets time pass, as on the real board)
+    millis: () => { timed(); clockRead(); return Math.floor(now()); },
+    micros: () => { timed(); clockRead(); return Math.floor(now() * 1000); },
     pulseIn(p: number, level: number, timeout = 1000000) {
       pin(p, 'pulseIn');
       const r = request(REQ.PULSE_IN, p, level ? 1 : 0, timeout);
@@ -323,9 +352,13 @@ function run(init: Start) {
     flush() { flush(); },
   };
   let txAddr = 0, tx: number[] = [], rx: number[] = [];
+  // I2C takes time on the wire: 9 clocks a byte (8 bits and the ACK) plus the address byte, start and
+  // stop, and a little for the board's driver. 100 kHz unless the program sets it (Wire.setClock).
+  let i2cHz = 100000;
+  const i2cMs = (n: number) => (((1 + n) * 9 + 2) / i2cHz) * 1000 + 0.015;
   const Wire = {
     begin() {},
-    setClock() {},
+    setClock(hz: number) { i2cHz = Math.max(10000, Math.min(3400000, Number(hz) || 100000)); },
     beginTransmission(a: number) { txAddr = a; tx = []; },
     write(x: any, n?: number) {
       if (Array.isArray(x) || x instanceof Uint8Array) for (const b of Array.from(x).slice(0, n ?? x.length)) tx.push(Number(b) & 255);
@@ -334,9 +367,11 @@ function run(init: Start) {
     },
     endTransmission() {
       if (tx.length > 500) throw new Error('Wire: more than 500 bytes in one transmission');
+      spend(i2cMs(tx.length));
       return request(REQ.I2C_WRITE, txAddr, tx.length, 0, tx).status; // 0 ok, 2 no answer at that address
     },
     requestFrom(a: number, n: number) {
+      spend(i2cMs(Math.min(n, 500)));
       const r = request(REQ.I2C_READ, a, Math.min(n, 500));
       rx = r.status === 0 ? r.data : [];
       return rx.length;
@@ -1040,6 +1075,7 @@ function run(init: Start) {
     const out: number[] = [];
     for (let i = 0; i < bytes.length; i += 500) {
       const chunk = bytes.slice(i, i + 500);
+      spend((chunk.length * 8) / 4000 + 0.005); // (8 clocks a byte at a usual 4 MHz)
       const r = request(REQ.SPI, chunk.length, 0, 0, [...snap(), ...chunk]);
       for (let j = 0; j < chunk.length; j++) out.push(r.status === 0 ? (r.data[j] ?? 0xff) : 0xff);
     }

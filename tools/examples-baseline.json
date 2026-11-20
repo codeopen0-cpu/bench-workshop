@@ -1,0 +1,1846 @@
+{
+ "seconds": 8,
+ "saved": "2026-11-20T18:46:33.510Z",
+ "results": [
+  {
+   "id": "app/ESP32 web switch",
+   "name": "ESP32 web switch",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "ESP32": 2
+   },
+   "lastLine": {
+    "ESP32": "Connected! The page is at http://192.168.1.100"
+   },
+   "pieces": {
+    "ESP32": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6649
+  },
+  {
+   "id": "app/MicroPython servo and button",
+   "name": "MicroPython servo and button",
+   "opened": true,
+   "problems": [],
+   "warnings": [
+    "Servo has power but no signal pulses on its orange wire: attach a Servo to that pin and write() an angle"
+   ],
+   "errors": [],
+   "serial": {
+    "Pico": 4
+   },
+   "lastLine": {
+    "Pico": "ready: press the button (click it while running)"
+   },
+   "pieces": {
+    "Pico": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6012
+  },
+  {
+   "id": "app/Obstacle-avoiding rover",
+   "name": "Obstacle-avoiding rover",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 76
+   },
+   "lastLine": {
+    "Brain": "distance: 999"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 444,
+     "maxAway": 444,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 448.5,
+     "maxAway": 448.5,
+     "up": -0.98,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 440.4,
+     "maxAway": 440.4,
+     "up": 0.61,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 8108
+  },
+  {
+   "id": "app/RP2040 and I2C modules",
+   "name": "RP2040 and I2C modules",
+   "opened": true,
+   "problems": [],
+   "warnings": [
+    "Servo has power but no signal pulses on its orange wire: attach a Servo to that pin and write() an angle"
+   ],
+   "errors": [],
+   "serial": {
+    "RP2040 board": 10
+   },
+   "lastLine": {
+    "RP2040 board": "PCA9685 at 0x41: servo S0 -> 2.0 ms\r"
+   },
+   "pieces": {
+    "RP2040 board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Motion sensor": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo driver": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo (case)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6503
+  },
+  {
+   "id": "app/Servo arm",
+   "name": "Servo arm",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 156
+   },
+   "lastLine": {
+    "Board": "angle 90"
+   },
+   "pieces": {
+    "Shoulder servo (horn)": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo battery (4x AA)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6407
+  },
+  {
+   "id": "app/Two-wheel rover",
+   "name": "Two-wheel rover",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {},
+   "lastLine": {},
+   "pieces": {
+    "Chassis": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6366
+  },
+  {
+   "id": "app/Wi-Fi remote-control rover",
+   "name": "Wi-Fi remote-control rover",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "ESP32": 4
+   },
+   "lastLine": {
+    "ESP32": "Connection status: 3"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6460
+  },
+  {
+   "id": "bluetooth-hc05/Phone switches an LED",
+   "name": "Phone switches an LED",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "HC-05": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6674
+  },
+  {
+   "id": "buzzers/Hears the buzzer",
+   "name": "Hears the buzzer",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 13
+   },
+   "lastLine": {
+    "Board": "heard it!"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Buzzer": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Sound sensor": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Heard it": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6536
+  },
+  {
+   "id": "buzzers/Play a tune",
+   "name": "Play a tune",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 18
+   },
+   "lastLine": {
+    "Board": "note 392"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Passive buzzer": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Active buzzer": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6802
+  },
+  {
+   "id": "climate-sensors/Weather to serial (BME280)",
+   "name": "Weather to serial (BME280)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 7
+   },
+   "lastLine": {
+    "Board": "21.0 C  50.0 %  1013.3 hPa  about 0 m up"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "BME280": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6791
+  },
+  {
+   "id": "climate-sensors/Weather to serial (DHT22)",
+   "name": "Weather to serial (DHT22)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 2
+   },
+   "lastLine": {
+    "Board": "Humidity: 45.0 %  Temperature: 22.5 C  Feels like: 22.0 C"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "DHT22": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6703
+  },
+  {
+   "id": "clock-ds3231/Clock and thermometer",
+   "name": "Clock and thermometer",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 7
+   },
+   "lastLine": {
+    "Board": "Friday 2026-11-20  12:40:15   22 C"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Clock": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6797
+  },
+  {
+   "id": "color-camera/Drone follows a red ball",
+   "name": "Drone follows a red ball",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Flight controller (ESP32-S3)": 34
+   },
+   "lastLine": {
+    "Flight controller (ESP32-S3)": "height:41.9 ball:53.5 side:0.5 ballUp:4.5 bySize:53.6 byFloor:54.0 speed:1 drift:-1 turn:-1 pitch:0.2 roll:-0.1 thrust:489.27"
+   },
+   "pieces": {
+    "Frame": {
+     "moved": 53.7,
+     "maxAway": 59.3,
+     "up": 1,
+     "fell": false
+    },
+    "Red ball": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 20546
+  },
+  {
+   "id": "color-camera/Rover chases a red ball",
+   "name": "Rover chases a red ball",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 181
+   },
+   "lastLine": {
+    "Brain": "got it!"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 48.5,
+     "maxAway": 48.5,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 51.9,
+     "maxAway": 51.9,
+     "up": -0.74,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 45.7,
+     "maxAway": 45.7,
+     "up": -0.53,
+     "fell": false,
+     "turns": true
+    },
+    "Red ball": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 18475
+  },
+  {
+   "id": "encoder-motor/Measure the speed",
+   "name": "Measure the speed",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 5
+   },
+   "lastLine": {
+    "Board": "power 120: 78 rpm"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Motor driver": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Motor (shaft)": {
+     "moved": 3.9,
+     "maxAway": 3.9,
+     "up": -1,
+     "fell": false,
+     "turns": true
+    },
+    "Motor battery": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6635
+  },
+  {
+   "id": "gps-neo6m/Where am I",
+   "name": "Where am I",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 8
+   },
+   "lastLine": {
+    "Board": "51.500700, -0.124599  0.0 km/h  moved 0 cm"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "GPS": {
+     "moved": 0.2,
+     "maxAway": 0.2,
+     "up": 0.99,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6720
+  },
+  {
+   "id": "ir-remote/Remote control an LED",
+   "name": "Remote control an LED",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 1
+   },
+   "lastLine": {
+    "Board": "Ready for the remote"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "IR receiver": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Remote": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6626
+  },
+  {
+   "id": "ir-sensors/How far? (VL53L0X)",
+   "name": "How far? (VL53L0X)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 15
+   },
+   "lastLine": {
+    "Board": "183 mm"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Target": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6666
+  },
+  {
+   "id": "ir-sensors/Line-following robot",
+   "name": "Line-following robot",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 1
+   },
+   "lastLine": {
+    "Brain": "following the line"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 71.8,
+     "maxAway": 86.5,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 84.2,
+     "maxAway": 96.9,
+     "up": -0.11,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 60.4,
+     "maxAway": 74.6,
+     "up": -0.12,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 63667
+  },
+  {
+   "id": "ir-sensors/Obstacle and line",
+   "name": "Obstacle and line",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 16
+   },
+   "lastLine": {
+    "Board": "blocked  sensor A: paper  sensor B: paper"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Something in the way": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Obstacle LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "Line LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 56699
+  },
+  {
+   "id": "joystick-encoder/Encoder counts",
+   "name": "Encoder counts",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Encoder (knob)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6703
+  },
+  {
+   "id": "joystick-encoder/Joystick steers a servo",
+   "name": "Joystick steers a servo",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Joystick": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6548
+  },
+  {
+   "id": "keypad/Keypad to serial",
+   "name": "Keypad to serial",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 360
+   },
+   "lastLine": {
+    "Board": "key: \u0000"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Keypad": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6520
+  },
+  {
+   "id": "lcd-parallel/Hello, LCD (LiquidCrystal)",
+   "name": "Hello, LCD (LiquidCrystal)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LCD": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Contrast knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6687
+  },
+  {
+   "id": "light-sensors/Colour names",
+   "name": "Colour names",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 1
+   },
+   "lastLine": {
+    "Board": "I see white (just the paper?)  (r 7671, g 7714, b 8137)"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Red block": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Green block": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Blue block": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Yellow block": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "White block": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 12036
+  },
+  {
+   "id": "light-sensors/Night light",
+   "name": "Night light",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 19
+   },
+   "lastLine": {
+    "Board": "lux:500 ldr:207"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Light sensor": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Light meter": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Night light": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "Box (drag it over a sensor)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 13632
+  },
+  {
+   "id": "motion-sensors/Compass and tilt alarm",
+   "name": "Compass and tilt alarm",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 25
+   },
+   "lastLine": {
+    "Board": "heading 90 deg (E  )"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Sensor board": {
+     "moved": 0.2,
+     "maxAway": 0.2,
+     "up": 1,
+     "fell": false
+    },
+    "Alarm LED": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6665
+  },
+  {
+   "id": "motion-sensors/Optical flow odometer",
+   "name": "Optical flow odometer",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 39
+   },
+   "lastLine": {
+    "Brain": "ahead_cm:13.2 sideways_cm:0.1 quality:157"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 8,
+     "maxAway": 154,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 7.8,
+     "maxAway": 154,
+     "up": 0.36,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 7.9,
+     "maxAway": 154.1,
+     "up": 0.42,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 8495
+  },
+  {
+   "id": "motion-sensors/Self-balancing robot",
+   "name": "Self-balancing robot",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 75
+   },
+   "lastLine": {
+    "Brain": "angle:-0.39 power:1.64"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 18,
+     "maxAway": 18,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 18.1,
+     "maxAway": 18.1,
+     "up": 0.71,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 18.1,
+     "maxAway": 18.1,
+     "up": 0.71,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 7135
+  },
+  {
+   "id": "neopixel/Rainbow stick",
+   "name": "Rainbow stick",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LED stick": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6748
+  },
+  {
+   "id": "nrf24-radio/Radio remote servo",
+   "name": "Radio remote servo",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Sender": 5,
+    "Receiver": 1
+   },
+   "lastLine": {
+    "Sender": "angle 90   got there: 99   lost: 1",
+    "Receiver": "angle: 90"
+   },
+   "pieces": {
+    "Sender": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Radio 1": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Receiver": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Radio 2": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Servo (case)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 10449
+  },
+  {
+   "id": "oled-ssd1306/Hello, OLED",
+   "name": "Hello, OLED",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "OLED": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 5555
+  },
+  {
+   "id": "relay-module/Relay blinks a lamp",
+   "name": "Relay blinks a lamp",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 8
+   },
+   "lastLine": {
+    "Board": "lamp off"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Relay": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Lamp battery (9 V)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Lamp": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6381
+  },
+  {
+   "id": "rfid-rc522/Door lock",
+   "name": "Door lock",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 2
+   },
+   "lastLine": {
+    "Board": "Hold a tag to the reader"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "White card": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Key fob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Open": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "Locked": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 7181
+  },
+  {
+   "id": "sd-card/Data logger",
+   "name": "Data logger",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 13
+   },
+   "lastLine": {
+    "Board": "4843,2048\r"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "SD card": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6503
+  },
+  {
+   "id": "servos/270, 360 and winch",
+   "name": "270, 360 and winch",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 32
+   },
+   "lastLine": {
+    "Board": "270 servo: 0 deg   360 servo: 0 deg   winch: 0 deg"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "270 deg servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "360 deg servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Winch servo (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6597
+  },
+  {
+   "id": "servos/Continuous servos and a knob",
+   "name": "Continuous servos and a knob",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 40
+   },
+   "lastLine": {
+    "Board": "write(90) = stop"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Speed knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "FS90R (continuous) (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "MG996R 360 (continuous) (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6570
+  },
+  {
+   "id": "servos/Smart servos",
+   "name": "Smart servos",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 6
+   },
+   "lastLine": {
+    "Board": "STS at 1461 (of 4096), 8.4 V   XL430 at 90.0 deg"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "STS3215 (horn)": {
+     "moved": 1.3,
+     "maxAway": 2.2,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "XL430 (horn)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6598
+  },
+  {
+   "id": "shift-register/Light chaser",
+   "name": "Light chaser",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "74HC595": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "LED 0": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 1": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 2": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 3": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 4": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 5": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 6": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    },
+    "LED 7": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6748
+  },
+  {
+   "id": "stepper-motors/28BYJ-48: a turn each way",
+   "name": "28BYJ-48: a turn each way",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 2
+   },
+   "lastLine": {
+    "Board": "one turn back"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Stepper (shaft)": {
+     "moved": 1.6,
+     "maxAway": 1.6,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6714
+  },
+  {
+   "id": "stepper-motors/NEMA 17 with AccelStepper",
+   "name": "NEMA 17 with AccelStepper",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 3
+   },
+   "lastLine": {
+    "Board": "arrived at 400"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "NEMA 17 (shaft)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "12 V supply": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6718
+  },
+  {
+   "id": "tft-displays/Colour dashboard",
+   "name": "Colour dashboard",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 1
+   },
+   "lastLine": {
+    "Board": "drawn"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Knob": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6906
+  },
+  {
+   "id": "tm1637-display/Counting clock",
+   "name": "Counting clock",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Display": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6441
+  },
+  {
+   "id": "touch-and-force/Bumper rover",
+   "name": "Bumper rover",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Brain": 5
+   },
+   "lastLine": {
+    "Brain": "bump! backing up"
+   },
+   "pieces": {
+    "Chassis": {
+     "moved": 42,
+     "maxAway": 42,
+     "up": 1,
+     "fell": false
+    },
+    "Right motor (hub)": {
+     "moved": 45.4,
+     "maxAway": 45.4,
+     "up": -1,
+     "fell": false,
+     "turns": true
+    },
+    "Left motor (hub)": {
+     "moved": 39.8,
+     "maxAway": 48,
+     "up": -0.35,
+     "fell": false,
+     "turns": true
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6955
+  },
+  {
+   "id": "touch-and-force/Kitchen scale",
+   "name": "Kitchen scale",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 10
+   },
+   "lastLine": {
+    "Board": "weight:0.0"
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Scale": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "100 g weight": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "250 g weight": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Apple": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6567
+  },
+  {
+   "id": "touch-and-force/Touch lamp and dimmer",
+   "name": "Touch lamp and dimmer",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "Board": 0
+   },
+   "lastLine": {
+    "Board": ""
+   },
+   "pieces": {
+    "Board": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Dimmer (knob)": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false,
+     "turns": true
+    },
+    "Lamp": {
+     "moved": 0.1,
+     "maxAway": 0.1,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6589
+  }
+ ]
+}

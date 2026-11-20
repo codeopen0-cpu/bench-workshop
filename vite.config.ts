@@ -126,6 +126,9 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
+    // (BENCH_STILL=1: no reloading when files change, for the example check's own server: editing
+    //  the source while it runs must not restart the page under it)
+    ...(process.env.BENCH_STILL ? { hmr: false, watch: null } : {}),
   },
   preview: {
     headers: {

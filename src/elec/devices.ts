@@ -456,12 +456,14 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const fix = (x: number[] | void) => (misoOk && x ? bytes.map((_, i) => (x[i] ?? 0xff) & 255) : none());
     return r instanceof Promise ? r.then(fix) : fix(r);
   };
-  const dev: Device & { espnowMac?: string; espnowIn?: (bytes: number[]) => boolean } = {
+  const dev: Device & { espnowMac?: string; espnowIn?: (bytes: number[]) => boolean; busStats(): object | null } = {
     view: v,
     // (its radio: ESP-NOW messages for its MAC, or for everyone, arrive here)
     espnowMac: spec.wifi ? macString : undefined,
     espnowIn: spec.wifi ? (bytes) => !!host && host.givePacket(ESPNOW_PIN, 'data', bytes, 0) : undefined,
     shorts: () => spec.shorts ?? [],
+    // (debug, for scripted tests: requests answered and the most in one step)
+    busStats: () => (host ? { ...host.stats, simMs: host.sh.f64[0] } : null),
     i2c: spec.i2c ? { ...spec.i2c, chips: [] } : undefined,
     drive(c) {
       const on = spec.power(c) > 0;
@@ -486,15 +488,19 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       const h = host;
       // messages the program sent (Serial1, an LED strip, SPI bytes): first, so they arrive before
       // whatever it asks next (an SPI answer after the bytes before it)
-      for (const p of host.takePackets()) {
-        if (p.proto === 'spi') {
-          spiTo(c, p.data.slice(0, SPI_SNAP), p.data.slice(SPI_SNAP), false);
-          continue;
+      const packets = () => {
+        for (const p of h.takePackets()) {
+          if (p.proto === 'spi') {
+            spiTo(c, p.data.slice(0, SPI_SNAP), p.data.slice(SPI_SNAP), false);
+            continue;
+          }
+          const id = byNum.get(p.pin);
+          if (id) c.send(uid, id, p.proto, p.data, p.baud || undefined);
         }
-        const id = byNum.get(p.pin);
-        if (id) c.send(uid, id, p.proto, p.data, p.baud || undefined);
-      }
-      host.serve({
+      };
+      packets();
+      // (several requests a step when the program's bus transfers fit in one: see SketchHost.serveAll)
+      host.serveAll({
         spi: (snap, bytes) => spiTo(c, snap, bytes, true),
         wifiJoin: (mode, ssid, pass) => {
           if (!hooks.net) return 0;
@@ -547,7 +553,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
           }
           return 0;
         },
-      });
+      }, packets);
       const sh = host.sh;
       for (const [n, id] of byNum) {
         const mode = sh.mode[n];

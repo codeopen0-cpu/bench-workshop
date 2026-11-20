@@ -30,6 +30,9 @@ interface Out {
 /** Renders a part camera's picture (set up by the app, which has the 3D scene): RGBA, top row first. */
 export const cameraHook: { render: ((marker: import('three').Object3D, def: import('./format').LibCamera) => Uint8Array | null) | null } = { render: null };
 
+/** off: library chips answer only through messages, a frame later (before 0.14; for comparing) */
+export const libMailbox = { on: true };
+
 class LibRun {
   worker: Worker;
   users = 0;
@@ -43,6 +46,13 @@ class LibRun {
   private sent = 0;
   private answered = 0;
   private lastAnswer = performance.now();
+  // The mailbox shared with its worker (see lib/worker.ts): I2C, and SPI that wants answers, are
+  // asked there and answered within the step (a moment's wait here), not a frame later.
+  private mail: { ctl: Int32Array; buf: Uint8Array } | null = null;
+  private mailBusy = false;
+  private spiPosted = 0;
+  /** debug: answered through the mailbox at once / later / the old way (messages) */
+  mailStats = { fast: 0, late: 0, posted: 0 };
 
   constructor(public lib: Library, private log: (m: string, l?: 'info' | 'warn' | 'bad') => void) {
     this.worker = new LibWorker();
@@ -51,7 +61,52 @@ class LibRun {
       this.failed = e.message;
       this.log(`library "${lib.name}": ${e.message}`, 'bad');
     };
-    this.worker.postMessage({ t: 'init', code: lib.code ?? '' });
+    let sab: SharedArrayBuffer | undefined;
+    if (typeof SharedArrayBuffer !== 'undefined' && (self as any).crossOriginIsolated !== false) {
+      sab = new SharedArrayBuffer(16 + 16384);
+      this.mail = { ctl: new Int32Array(sab, 0, 4), buf: new Uint8Array(sab, 16) };
+    }
+    this.worker.postMessage({ t: 'init', code: lib.code ?? '', mail: sab });
+  }
+  /** Ask the worker through the mailbox: the answer now if it comes within 3 ms, else a Promise of it.
+   *  null: the mailbox can't be used now (ask the old way). */
+  private askMail(q: any): any | Promise<any> | null {
+    const m = this.mail;
+    if (!m || !libMailbox.on || this.mailBusy || this.failed || !this.ready) return null;
+    const bytes = new TextEncoder().encode(JSON.stringify({ ...q, after: this.spiPosted }));
+    if (bytes.length > m.buf.length) return null;
+    m.buf.set(bytes);
+    Atomics.store(m.ctl, 1, bytes.length);
+    Atomics.store(m.ctl, 0, 1);
+    Atomics.notify(m.ctl, 0);
+    const take = () => {
+      const a = JSON.parse(new TextDecoder().decode(m.buf.slice(0, Atomics.load(m.ctl, 1))));
+      Atomics.store(m.ctl, 0, 0);
+      Atomics.notify(m.ctl, 0);
+      return a;
+    };
+    const t0 = performance.now();
+    while (performance.now() - t0 < 3) if (Atomics.load(m.ctl, 0) === 2) break;
+    if (Atomics.load(m.ctl, 0) === 2) {
+      this.mailStats.fast++;
+      if (this.mailStats.fast === 1) console.info(`[library] ${this.lib.id}: its chips answer through the shared mailbox (within the step)`);
+      return take();
+    }
+    // (busy with a step, or stuck: wait without holding up the app)
+    this.mailBusy = true;
+    this.mailStats.late++;
+    return new Promise((resolve) => {
+      const poll = () => {
+        if (Atomics.load(m.ctl, 0) === 2) {
+          this.mailBusy = false;
+          resolve(take());
+        } else if (this.failed) {
+          this.mailBusy = false;
+          resolve(null);
+        } else setTimeout(poll, 1);
+      };
+      poll();
+    });
   }
   private msg(m: any) {
     if (m.t === 'ready') {
@@ -109,15 +164,26 @@ class LibRun {
     if (this.failed) return reply ? Promise.resolve(new Array(bytes.length).fill(0xff)) : undefined;
     if (!reply) {
       this.worker.postMessage({ t: 'spi', id: 0, uid, bytes, pins });
+      this.spiPosted++;
       return undefined;
     }
+    const a = this.askMail({ k: 'spi', uid, bytes, pins });
+    if (a instanceof Promise) return a.then((x) => (x?.data as number[] | undefined) ?? new Array(bytes.length).fill(0xff));
+    if (a) return (a.data as number[]) ?? [];
+    this.mailStats.posted++;
     return new Promise<number[]>((resolve) => {
       const id = this.i2cId++;
       this.spiWait.set(id, resolve);
       this.worker.postMessage({ t: 'spi', id, uid, bytes, pins });
     });
   }
-  i2c(uid: string, op: 'w' | 'r', arg: number[] | number) {
+  /** an I2C transfer to one of its parts: the answer now (through the mailbox) or later */
+  i2c(uid: string, op: 'w' | 'r', arg: number[] | number): { ok: boolean; data: number[] | null } | Promise<{ ok: boolean; data: number[] | null }> {
+    const no = { ok: false, data: null };
+    const a = this.failed ? null : this.askMail(op === 'w' ? { k: 'i2c', uid, op, bytes: arg } : { k: 'i2c', uid, op, n: arg });
+    if (a instanceof Promise) return a.then((x) => x ?? no);
+    if (a) return a;
+    this.mailStats.posted++;
     return new Promise<{ ok: boolean; data: number[] | null }>((resolve) => {
       if (this.failed) return resolve({ ok: false, data: null });
       const id = this.i2cId++;
@@ -127,6 +193,8 @@ class LibRun {
   }
   dispose() {
     this.worker.terminate();
+    this.failed ??= 'stopped'; // (a mailbox answer still awaited stops being waited for)
+    if (this.mailStats.fast || this.mailStats.late) console.info(`[library] ${this.lib.id}: ${this.mailStats.fast} answers within the step, ${this.mailStats.late} later, ${this.mailStats.posted} by message`);
     for (const r of this.i2cWait.values()) r({ ok: false, data: null });
     this.i2cWait.clear();
     for (const r of this.spiWait.values()) r([]);
@@ -219,8 +287,14 @@ export function libraryDevice(v: PartView, lib: Library, part: LibPart, hooks: D
   const chip: I2CChip = {
     name: `${v.inst.name} (${lib.name})`,
     address: () => r.outs.get(uid)?.addr ?? -1,
-    write: (bytes) => r.i2c(uid, 'w', bytes).then((x) => x.ok),
-    read: (n) => r.i2c(uid, 'r', n).then((x) => (x.ok ? x.data : null)),
+    write: (bytes) => {
+      const x = r.i2c(uid, 'w', bytes);
+      return x instanceof Promise ? x.then((y) => y.ok) : x.ok;
+    },
+    read: (n) => {
+      const x = r.i2c(uid, 'r', n);
+      return x instanceof Promise ? x.then((y) => (y.ok ? y.data : null)) : x.ok ? x.data : null;
+    },
   };
   const blank = (s: (typeof screens extends Map<any, infer T> ? T : never)) => {
     s.cells = s.def.mode === 'text' ? Array.from({ length: s.def.px[1] }, () => ' '.repeat(s.def.px[0])) : new Array(s.def.px[0] * s.def.px[1]).fill(0);

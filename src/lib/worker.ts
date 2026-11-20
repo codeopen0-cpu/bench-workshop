@@ -91,9 +91,79 @@ const fail = (inst: Inst, e: any) => {
   post({ t: 'error', uid: inst.uid, message: inst.failed });
 };
 
+/** an I2C transfer to one of its parts: [ok, bytes read] */
+function doI2c(m: { uid: string; op: 'w' | 'r'; bytes?: number[]; n?: number }): { ok: boolean; data: number[] | null } {
+  const inst = insts.get(m.uid);
+  let ok = false, data: number[] | null = null;
+  try {
+    const bus = inst?.dev?.i2c;
+    if (bus && !inst!.failed) {
+      if (m.op === 'w') ok = bus.write ? !!bus.write(m.bytes ?? []) : true;
+      else {
+        data = bus.read ? Array.from(bus.read(m.n ?? 1) ?? [], (x: any) => Number(x) & 255) : null;
+        ok = !!data;
+      }
+    }
+  } catch (err) {
+    if (inst) fail(inst, err);
+  }
+  return { ok, data };
+}
+/** an SPI transfer to one of its parts (its CS pin low): its answers, one per byte */
+function doSpi(m: { uid: string; bytes: number[]; pins: any; id?: number }): number[] {
+  const inst = insts.get(m.uid);
+  let data: number[] = [];
+  try {
+    const bus = inst?.dev?.spi;
+    if (bus?.transfer && !inst!.failed) {
+      const r = bus.transfer(m.bytes, Object.freeze({ ...m.pins }));
+      if (m.id) data = Array.from(r ?? [], (x: any) => Number(x) & 255);
+    }
+  } catch (err) {
+    if (inst) fail(inst, err);
+  }
+  return data;
+}
+
+// The mailbox shared with the app (lib/runtime.ts): an I2C transfer, or an SPI one that wants
+// answers, arrives here while the program that asked waits, and is answered at once (not through
+// the app's message queue, which would hold it up until the app's next frame).
+// ctl[0]: 0 empty, 1 a question waits, 2 its answer waits; ctl[1]: bytes of JSON in buf.
+let mail: { ctl: Int32Array; buf: Uint8Array } | null = null;
+let spiDone = 0; // SPI messages without answers handled so far (a question comes after those sent before it)
+let mailHeld: any = null;
+const mailText = new TextDecoder(), mailBytes = new TextEncoder();
+function answerMail(q: any) {
+  const a = q.k === 'i2c' ? doI2c(q) : { data: doSpi({ ...q, id: 1 }) };
+  const b = mailBytes.encode(JSON.stringify(a));
+  mail!.buf.set(b.subarray(0, mail!.buf.length));
+  Atomics.store(mail!.ctl, 1, Math.min(b.length, mail!.buf.length));
+  Atomics.store(mail!.ctl, 0, 2);
+  Atomics.notify(mail!.ctl, 0);
+}
+async function mailLoop() {
+  const waitAsync = (Atomics as any).waitAsync as ((a: Int32Array, i: number, v: number) => { async: boolean; value: any }) | undefined;
+  if (!mail || !waitAsync) return;
+  for (;;) {
+    const st = Atomics.load(mail.ctl, 0);
+    if (st === 1 && !mailHeld) {
+      const q = JSON.parse(mailText.decode(mail.buf.slice(0, Atomics.load(mail.ctl, 1))));
+      if ((q.after ?? 0) > spiDone) mailHeld = q; // (answered once the SPI messages before it are in)
+      else answerMail(q);
+      continue;
+    }
+    const w = waitAsync(mail.ctl, 0, st); // (until it changes)
+    if (w.async) await w.value;
+  }
+}
+
 self.onmessage = (e: MessageEvent) => {
   const m = e.data;
   if (m.t === 'init') {
+    if (m.mail instanceof SharedArrayBuffer) {
+      mail = { ctl: new Int32Array(m.mail, 0, 4), buf: new Uint8Array(m.mail, 16) };
+      void mailLoop();
+    }
     const bench = Object.freeze({
       device(name: string, make: (part: any) => any) {
         if (typeof name !== 'string' || typeof make !== 'function') throw new Error('bench.device(name, (part) => ({...}))');
@@ -402,33 +472,18 @@ self.onmessage = (e: MessageEvent) => {
     if (c) c.frame = { width: m.w, height: m.h, data: new Uint8Array(m.data.buffer ?? m.data), time: m.time };
   } else if (m.t === 'spi') {
     // a board's SPI transfer while this part's CS pin is low: its answers (one per byte)
-    const inst = insts.get(m.uid);
-    let data: number[] = [];
-    try {
-      const bus = inst?.dev?.spi;
-      if (bus?.transfer && !inst!.failed) {
-        const r = bus.transfer(m.bytes, Object.freeze({ ...m.pins }));
-        if (m.id) data = Array.from(r ?? [], (x: any) => Number(x) & 255);
-      }
-    } catch (err) {
-      if (inst) fail(inst, err);
-    }
+    const data = doSpi(m);
     if (m.id) post({ t: 'spi', id: m.id, data });
-  } else if (m.t === 'i2c') {
-    const inst = insts.get(m.uid);
-    let ok = false, data: number[] | null = null;
-    try {
-      const bus = inst?.dev?.i2c;
-      if (bus && !inst!.failed) {
-        if (m.op === 'w') ok = bus.write ? !!bus.write(m.bytes) : true;
-        else {
-          data = bus.read ? Array.from(bus.read(m.n) ?? [], (x: any) => Number(x) & 255) : null;
-          ok = !!data;
-        }
+    else {
+      spiDone++;
+      if (mailHeld && (mailHeld.after ?? 0) <= spiDone) {
+        const q = mailHeld;
+        mailHeld = null;
+        answerMail(q);
       }
-    } catch (err) {
-      if (inst) fail(inst, err);
     }
-    post({ t: 'i2c', id: m.id, ok, data });
+  } else if (m.t === 'i2c') {
+    const r = doI2c(m);
+    post({ t: 'i2c', id: m.id, ok: r.ok, data: r.data });
   }
 };

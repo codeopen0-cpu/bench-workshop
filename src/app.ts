@@ -1097,6 +1097,11 @@ export class App {
     }
     this.sim!.sync();
   }
+  /** Run every example for a while and report what happened (tools/check_examples.mjs). */
+  async checkExamples(opts: import('./dev/examplecheck').CheckOptions = {}) {
+    const m = await import('./dev/examplecheck');
+    return m.checkExamples(this, opts);
+  }
   pause() {
     if (this.mode === 'run') this.mode = 'paused';
     else if (this.mode === 'paused') this.mode = 'run';

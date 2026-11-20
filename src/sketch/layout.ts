@@ -32,6 +32,7 @@ export const CTL = {
   // input pin changes, in order (so interrupts see every edge, even several within one frame)
   IN_HEAD: 24, // written by the simulation...
   IN_TAIL: 25, // ...read by the program
+  PARK: 26, // the STEP value the program sleeps on (waiting for the simulation to catch up), -1 while it runs
 } as const;
 export const IN_EVENTS = 2048;
 export const PKT_RING = 32768;

@@ -5,7 +5,8 @@ wire them, program them, run them, and see whether they work (and look right) be
 for real. Not just robots: anything with boards, motors, sensors and displays.
 
 **[Download the latest version](https://github.com/codeopen0-cpu/bench-workshop/releases/latest)**
-(Windows: `Bench Workshop_x.y.z_x64-setup.exe`). It updates itself when a new version comes out.
+(Windows: `Bench Workshop_x.y.z_x64-setup.exe`; Linux: the `.deb` or the `.AppImage`). On Windows it
+updates itself when a new version comes out; on Linux it tells you and opens the download page.
 
 It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, build your own.
 
@@ -26,7 +27,10 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
 - **Wire** pins together. Power, shorts, floating inputs and over-voltage are checked as it runs, and
   **Check** reads the wiring without running it.
 - **Program** boards with Arduino-style sketches written in the app (real ESP32 and Arduino sketches
-  run as they are: `#if`, structs, lambdas, `String`, `Preferences`, `ledc`...), run a real
+  run as they are: `#if`, structs, lambdas, `String`, `Preferences`, `ledc`...). Time in a sketch
+  passes as on the chip: an I2C read takes what it takes on the wire at its clock (`Wire.setClock`),
+  `delayMicroseconds` waits microseconds, so fast loops (a flight controller's 500 a second) run at
+  their real speed. Or run a real
   RP2040 `.uf2` on an emulated chip (GPIO, PWM, ADC, I2C, USB serial), or write **MicroPython**:
   the real MicroPython (1.29, bundled) runs on that chip, with its `>>>` prompt in the serial monitor.
 - **Wi-Fi boards** (ESP32, UNO R4 WiFi layout) join the bench's own network and serve real web pages
@@ -42,6 +46,8 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
 - **Mechanics and flying:** gears that mesh by tooth count, pulleys and belts, tank tracks,
   mecanum and omni wheels, brushless motors with propellers and ESCs. The colour camera library has
   a quadcopter that follows a ball: its own flight controller sketch (ESP32-S3, MPU-6050, sonar).
+  For drones and rovers there are a compass, a barometer, a laser rangefinder and an optical flow
+  sensor (PMW3901) in the libraries.
 - **Boards:** Arduino Nano and Mega, ESP8266 (NodeMCU, D1 mini), ESP32, ESP32-S3 and C3, Pico and
   Pico W. ESP32s talk over ESP-NOW; a PS2 controller library is played with a game pad.
 - **Sensors that see:** distance (HC-SR04), a thermal camera (AMG8833, with the Adafruit_AMG88xx
@@ -79,7 +85,14 @@ npm install
 npm run dev        # just the page, in a browser at http://localhost:1420
 npm run app        # the desktop app, live-reloading (Tauri + Vite)
 npm run check      # type-check
+npm run examples   # run every example (the app's and the libraries') and compare with the last good run
 ```
+
+`npm run examples` (tools/check_examples.mjs) opens every example in a hidden Edge or Chromium
+window, runs each for 8 simulated seconds and writes `tools/examples-report.md`: what broke (a
+program that crashed, an error, a part that fell off the bench or tipped over, a board that stopped
+printing) and what changed (a part that went much farther or less far than before). Run it before a
+release; `--update` keeps the run as the new good one (`tools/examples-baseline.json`).
 
 ### Your own installer
 
@@ -98,7 +111,9 @@ has none). Or set `bundle.createUpdaterArtifacts` to `false` to build without up
 
 `node tools/release.mjs "what's new"` publishes a built version as a GitHub release (it uses the
 `gh` CLI's login). Bump `version` in `package.json`, `src-tauri/tauri.conf.json` and
-`src-tauri/Cargo.toml` before each one.
+`src-tauri/Cargo.toml` before each one. Publishing the release starts the Linux build on GitHub
+(`.github/workflows/linux.yml`), which adds the `.deb` and the `.AppImage` to it; it builds the
+source as tagged, so put the source on GitHub before the release.
 
 The library list lives in `registry/` (published as its own repository); see `registry/README.md`
 and `registry/GUIDE.md` for making a library.

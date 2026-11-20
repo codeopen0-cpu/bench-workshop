@@ -24,12 +24,16 @@ export interface Requests {
 }
 
 export class SketchHost {
+  /** false: programs get the old timing (every wait and bus transfer a whole step), for comparing
+   *  (the example check's --old-timing) */
+  static fineTiming = true;
   sh = new Shared();
   private worker: Worker;
   state = 'starting';
   error: string | null = null;
 
   constructor(code: string, constants: Record<string, number>, analogPins: number[], libs: { name: string; code: string; exports: string[] }[], private ev: HostEvents, wifi = false, wifiWaits = false, board: { adcBits?: number; pwmPins?: number[] } = {}) {
+    this.sh.ctl[CTL.PARK] = -1;
     this.worker = new SketchWorker();
     this.worker.onmessage = (e) => {
       const m = e.data;
@@ -49,17 +53,67 @@ export class SketchHost {
       this.error = e.message;
       ev.error(e.message, null);
     };
-    this.worker.postMessage({ type: 'start', sab: this.sh.sab, code, constants, analogPins, libs, wifi, wifiWaits, adcBits: board.adcBits, pwmPins: board.pwmPins });
+    this.worker.postMessage({ type: 'start', sab: this.sh.sab, code, constants, analogPins, libs, wifi, wifiWaits, adcBits: board.adcBits, pwmPins: board.pwmPins, fineTime: SketchHost.fineTiming });
   }
 
   /** Simulation time moved on: wake the program if it's waiting. */
   tick(ms: number) {
+    const d = ms - this.sh.f64[0];
+    if (d > 0 && d < 50) this.sh.f64[1] = d; // (the step length: how far ahead the program may run)
     this.sh.f64[0] = ms;
     Atomics.add(this.sh.ctl, CTL.STEP, 1);
     Atomics.notify(this.sh.ctl, CTL.STEP);
   }
 
   private busy = false;
+  /** answered requests in a row last step (the program is reading chips: expect more right away) */
+  private streak = 0;
+  /** debug: requests answered, steps that answered more than one, the most in one step */
+  stats = { served: 0, burstSteps: 0, maxBurst: 0 };
+
+  /** Answer the program's requests this step: the one waiting, and the ones it sends right after,
+   *  until its clock is a step ahead of the simulation (it then sleeps on PARK) or it stops asking.
+   *  before() runs before each answer (messages it sent in between go first). */
+  serveAll(r: Requests, before?: () => void) {
+    const c = this.sh.ctl;
+    const step = Atomics.load(c, CTL.STEP);
+    const t0 = performance.now();
+    let n = 0;
+    if (!SketchHost.fineTiming) {
+      before?.();
+      if (Atomics.load(c, CTL.REQ) === 1) this.serve(r);
+      return 1;
+    }
+    for (;;) {
+      if (this.busy) break; // (an emulated chip answers later)
+      if (Atomics.load(c, CTL.REQ) === 1) {
+        before?.();
+        this.serve(r);
+        n++;
+        if (n >= 400 || performance.now() - t0 > 2) break; // (a step's worth of CPU at most)
+        continue;
+      }
+      // nothing waiting: worth a moment's wait only when it's in the middle of reading chips
+      if (!n && !this.streak) break;
+      const tw = performance.now();
+      let got = false;
+      while (performance.now() - tw < 0.15) {
+        if (Atomics.load(c, CTL.REQ) === 1) { got = true; break; }
+        if (Atomics.load(c, CTL.PARK) === step || Atomics.load(c, CTL.STATE) === 3) break; // asleep until the next step / stopped
+      }
+      if (!got) break;
+    }
+    this.streak = n;
+    if (n) {
+      this.stats.served += n;
+      if (n > 1) this.stats.burstSteps++;
+      if (n > this.stats.maxBurst) {
+        if (this.stats.maxBurst <= 1 && n > 1) console.info(`[sketch] answering ${n} bus requests in one step (the program's own clock runs within a step of the simulation)`);
+        this.stats.maxBurst = n;
+      }
+    }
+    return n;
+  }
 
   /** Answer the program's waiting request, if any (now, or when an emulated chip has answered). */
   serve(r: Requests) {
