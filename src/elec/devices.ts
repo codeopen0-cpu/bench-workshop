@@ -33,7 +33,7 @@ const wifiLine = (i: { status: number; ip: string; ap: string | null; server: { 
 export const sketchLibraries = {
   resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[] } => ({ libs: [], classes: [], missing: includes }),
 };
-const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|Adafruit_AMG88xx|RPLidar|inc\/rptypes|avr\/.*)\.h$/;
+const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|ESP32Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|Adafruit_AMG88xx|RPLidar|inc\/rptypes|avr\/.*)\.h$/;
 export const lensMeshes = (v: PartView, flag: string) => {
   const out: THREE.Mesh[] = [];
   for (const b of v.bodies.values()) b.traverse((m) => m.userData[flag] && (m as THREE.Mesh).isMesh && out.push(m as THREE.Mesh));

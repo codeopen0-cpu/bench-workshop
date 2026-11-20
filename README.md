@@ -40,7 +40,8 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
   straight from the app (Libraries > Publish). Their code runs sealed off, and every library is
   safety-checked.
 - **Mechanics and flying:** gears that mesh by tooth count, pulleys and belts, tank tracks,
-  mecanum and omni wheels, brushless motors with propellers and ESCs.
+  mecanum and omni wheels, brushless motors with propellers and ESCs. The colour camera library has
+  a quadcopter that follows a ball: its own flight controller sketch (ESP32-S3, MPU-6050, sonar).
 - **Boards:** Arduino Nano and Mega, ESP8266 (NodeMCU, D1 mini), ESP32, ESP32-S3 and C3, Pico and
   Pico W. ESP32s talk over ESP-NOW; a PS2 controller library is played with a game pad.
 - **Sensors that see:** distance (HC-SR04), a thermal camera (AMG8833, with the Adafruit_AMG88xx

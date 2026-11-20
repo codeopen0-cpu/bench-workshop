@@ -349,6 +349,9 @@ function run(init: Start) {
     private deg = 90;
     private lo = 500;
     private hi = 2500;
+    private hz = 50;
+    /** ESP32Servo: pulses this many times a second (servos 50; ESCs take up to 400-500) */
+    setPeriodHertz(h: number) { this.hz = Math.max(20, Math.min(500, Number(h) || 50)); }
     attach(p: number, min?: number, max?: number) {
       this.p = pin(p, 'Servo.attach');
       if (min) this.lo = min;
@@ -359,8 +362,8 @@ function run(init: Start) {
     attached() { return this.p >= 0; }
     writeMicroseconds(us: number) {
       if (this.p < 0) throw new Error('Servo.write() before Servo.attach(pin)');
-      sh.duty[this.p] = Math.max(0, Math.min(1, us / 20000)); // 50 Hz frame
-      sh.hz[this.p] = 50;
+      sh.duty[this.p] = Math.max(0, Math.min(1, (us * this.hz) / 1e6)); // (50 Hz: a 20 ms frame)
+      sh.hz[this.p] = this.hz;
       sh.out[this.p] = 0;
     }
     write(v: number) {
