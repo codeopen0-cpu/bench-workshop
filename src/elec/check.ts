@@ -3,6 +3,7 @@
 // on a GPIO pin); "warn" = it looks wrong but may be meant (nothing powers a part, an input nothing
 // drives). Run it again after a change: what went away shows as fixed.
 import type { PinDef } from '../parts/types';
+import { boardPinIssues } from './boardpins';
 import type { Project } from '../project';
 import type { PartView } from '../views';
 
@@ -139,7 +140,9 @@ export function checkCircuit(project: Project, views: Map<string, PartView>, pro
     const vins = ps.filter((p) => p.kind === 'vin');
     const selfPowered = v.inst.params.usb === true;
     if (vins.length && !selfPowered) {
-      const fed = vins.some((p) => netOf(v.inst.uid, p.id).some((q) => q.uid !== v.inst.uid && (sourceVolts(q.view, q.pin) !== null || q.pin.kind === 'vout')));
+      // (a board on USB gives 5 V on its 5V / VBUS pin, too)
+      const usb5 = (q: PinAt) => q.pin.kind === 'vin' && programmableTypes.has(q.view.inst.type) && q.view.inst.params.usb === true && /5V|VBUS/i.test(`${q.pin.id} ${q.pin.label ?? ''}`);
+      const fed = vins.some((p) => netOf(v.inst.uid, p.id).some((q) => q.uid !== v.inst.uid && (sourceVolts(q.view, q.pin) !== null || q.pin.kind === 'vout' || usb5(q))));
       if (!fed) add('warn', `nopower:${v.inst.uid}`, `${v.inst.name} has no power: wire its ${vins.map((p) => p.label ?? p.id).join(' / ')} to a supply (and its GND to the supply's ground).`, [v.inst.uid]);
       const gnd = ps.find((p) => p.kind === 'gnd');
       if (fed && gnd && !netOf(v.inst.uid, gnd.id).some((q) => q.uid !== v.inst.uid)) add('warn', `nognd:${v.inst.uid}`, `${v.inst.name}'s GND isn't wired: without a ground back to the supply, no current flows and it stays off.`, [v.inst.uid]);
@@ -154,6 +157,9 @@ export function checkCircuit(project: Project, views: Map<string, PartView>, pro
   for (const v of views.values())
     for (const d of ((v.build as any).designIssues ?? []) as { level: Issue['level']; what: string }[])
       add(d.level, `design:${v.inst.type}:${d.what}`, `${v.inst.name} (its own board design): ${d.what}`, [v.inst.uid]);
+
+  // 10. what works here but not on the real board: its special pins (boardpins.ts)
+  boardPinIssues(project, views, netOf, sourceVolts, programmableTypes, isPowerPart, add);
 
   issues.sort((a, b) => (a.level === b.level ? 0 : a.level === 'fault' ? -1 : 1));
   return issues;

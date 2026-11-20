@@ -57,6 +57,7 @@ function batteryDevice(v: PartView, spec: Spec): Device {
       return [`${volts.toFixed(2)} V`, `${(amps * 1000).toFixed(0)} mA`, `${(soc * 100).toFixed(soc < 0.1 ? 1 : 0)}% charged${Number.isFinite(left) ? `, ${hm(left)} left at this draw` : ''}`];
     },
     controls: () => [{ label: 'Charge (%)', min: 0, max: 100, step: 1, get: () => Math.round(soc * 100), set: (x) => { soc = x / 100; off = false; } }],
+    power: () => ({ volts, amps, maxA: spec.maxA, open: off || soc <= 0 ? 0 : spec.regulated ?? spec.cells * ch.curve(Math.max(0, soc)) }),
   };
   return dev;
 }
@@ -83,6 +84,7 @@ function benchSupplyDevice(v: PartView): Device {
       if (cc) c.warnOnce(`cc:${uid}`, `${name(v)} hit its ${limit()} A current limit: it lowered its voltage to ${volts.toFixed(2)} V (CC). Raise the limit, or find what draws so much.`);
     },
     status: () => [`${volts.toFixed(2)} V`, `${amps.toFixed(3)} A`, cc ? 'CC (current limit)' : 'CV'],
+    power: () => ({ volts, amps, maxA: limit(), open: set() }),
   };
   return dev;
 }

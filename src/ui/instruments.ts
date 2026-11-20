@@ -15,7 +15,12 @@ export interface InstrumentHost {
   hint(text: string): void;
   /** the parts (and the bench) a point can be picked on */
   pickRoots(): THREE.Object3D[];
+  /** a part body's shapes (in its own frame): the ruler snaps to their corners and centres */
+  shapesOf?(uid: string, body: string): { shape: import('../parts/types').Shape; pos?: [number, number, number]; rot?: [number, number, number, number] }[];
 }
+
+/** a ruler end: on a part's body (it moves with it) or a fixed point (the bench) */
+interface End { obj: THREE.Object3D | null; local: THREE.Vector3; snapped: string | null }
 
 const mark = (color: number) => {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), new THREE.MeshBasicMaterial({ color, depthTest: false }));
@@ -31,8 +36,8 @@ export class Instruments {
   private b = mark(0x3fa9ff);
   private line: THREE.Line;
   private label: HTMLDivElement;
-  private pa: THREE.Vector3 | null = null;
-  private pb: THREE.Vector3 | null = null;
+  private pa: End | null = null;
+  private pb: End | null = null;
   /** multimeter probes: red and black, on pins */
   private red: PinRef | null = null;
   private black: PinRef | null = null;
@@ -65,7 +70,7 @@ export class Instruments {
     this.label.hidden = true;
   }
   hintNow() {
-    if (this.mode === 'ruler') this.host.hint(this.pa && !this.pb ? 'Ruler: click the second point  ·  M or Esc: put it away' : 'Ruler: click a point on a part or the bench, then another  ·  M or Esc: put it away');
+    if (this.mode === 'ruler') this.host.hint(this.pa && !this.pb ? 'Ruler: click the second point (it snaps to corners, edges and hole centres; hold Alt for exactly where you click)  ·  M or Esc: put it away' : 'Ruler: click a point on a part or the bench, then another (it snaps to corners, edges and hole centres; Alt: no snapping; the ends stay on the parts as they move)  ·  M or Esc: put it away');
     else if (this.mode === 'meter') this.host.hint(this.red && !this.black ? 'Multimeter: the red probe is on; click another pin for the black one (or read it against ground)  ·  V or Esc: put it away' : 'Multimeter: click a pin for the red probe (its volts to ground), then another for the black one  ·  V or Esc: put it away');
   }
 
@@ -75,9 +80,10 @@ export class Instruments {
     if (this.mode === 'ruler') {
       const hit = this.host.stage.pick(ev, this.host.pickRoots(), true);
       if (!hit) return true;
-      const p = hit.point.clone();
-      if (!this.pa || this.pb) { this.pa = p; this.pb = null; }
-      else this.pb = p;
+      const end = this.endAt(ev, hit.point, hit.object, !ev.altKey);
+      if (!this.pa || this.pb) { this.pa = end; this.pb = null; }
+      else this.pb = end;
+      console.info(`[ruler] point ${this.pb ? 2 : 1}${end.snapped ? ` snapped to ${end.snapped}` : ''}${end.obj ? ` on ${end.obj.name}` : ' on the bench'}`);
     } else {
       const pin = this.host.pinAt(ev);
       if (!pin) return true;
@@ -89,6 +95,49 @@ export class Instruments {
     return true;
   }
 
+  /** Where a click lands: the nearest corner, face centre or hole centre of the part under it (within
+   *  14 pixels on screen; Alt: exactly where clicked), fixed to that part's body so it follows it. */
+  private endAt(ev: PointerEvent, point: THREE.Vector3, object: THREE.Object3D, snap: boolean): End {
+    let body: THREE.Object3D | null = object;
+    while (body && !body.userData.isBody) body = body.parent;
+    if (!body) return { obj: null, local: point.clone(), snapped: null };
+    body.updateWorldMatrix(true, false);
+    const inv = body.matrixWorld.clone().invert();
+    let best: { p: THREE.Vector3; what: string } | null = null;
+    if (snap && this.host.shapesOf) {
+      const cam = this.host.stage.camera, r = this.host.stage.renderer.domElement.getBoundingClientRect();
+      const screen = (p: THREE.Vector3) => {
+        const v = p.clone().applyMatrix4(body!.matrixWorld).project(cam);
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+      };
+      let bd = 14;
+      for (const c of this.host.shapesOf(body.userData.uid, body.userData.body)) {
+        const cp = new THREE.Vector3(...(c.pos ?? [0, 0, 0])), cq = new THREE.Quaternion(...(c.rot ?? [0, 0, 0, 1]));
+        const at = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(cq).add(cp);
+        const cands: { p: THREE.Vector3; what: string }[] = [];
+        const s2 = c.shape;
+        if (s2.kind === 'box') {
+          for (const x of [-s2.hx, s2.hx]) for (const y of [-s2.hy, s2.hy]) for (const z of [-s2.hz, s2.hz]) cands.push({ p: at(x, y, z), what: 'a corner' });
+          for (const [x, y, z] of [[s2.hx, 0, 0], [-s2.hx, 0, 0], [0, s2.hy, 0], [0, -s2.hy, 0], [0, 0, s2.hz], [0, 0, -s2.hz]]) cands.push({ p: at(x, y, z), what: 'the middle of a face' });
+          for (const x of [-s2.hx, s2.hx]) for (const y of [-s2.hy, s2.hy]) cands.push({ p: at(x, y, 0), what: 'the middle of an edge' });
+          for (const y of [-s2.hy, s2.hy]) for (const z of [-s2.hz, s2.hz]) cands.push({ p: at(0, y, z), what: 'the middle of an edge' });
+          for (const x of [-s2.hx, s2.hx]) for (const z of [-s2.hz, s2.hz]) cands.push({ p: at(x, 0, z), what: 'the middle of an edge' });
+        } else if (s2.kind === 'cylinder') {
+          cands.push({ p: at(0, s2.halfHeight, 0), what: 'the centre of a round face' }, { p: at(0, -s2.halfHeight, 0), what: 'the centre of a round face' }, { p: at(0, 0, 0), what: 'the centre' });
+        } else if (s2.kind === 'ball') cands.push({ p: at(0, 0, 0), what: 'the centre' });
+        for (const k of cands) {
+          const sp = screen(k.p);
+          const d = Math.hypot(sp.x - ev.clientX, sp.y - ev.clientY);
+          if (d < bd) { bd = d; best = k; }
+        }
+      }
+    }
+    return best ? { obj: body, local: best.p, snapped: best.what } : { obj: body, local: point.clone().applyMatrix4(inv), snapped: null };
+  }
+  private worldOf(e: End) {
+    return e.obj ? e.local.clone().applyMatrix4(e.obj.matrixWorld) : e.local.clone();
+  }
+
   /** each frame: the markers, the line and the reading where they are now */
   update() {
     if (!this.mode) return;
@@ -96,11 +145,12 @@ export class Instruments {
     let p1: THREE.Vector3 | null = null, p2: THREE.Vector3 | null = null;
     let text = '';
     if (this.mode === 'ruler') {
-      p1 = this.pa; p2 = this.pb;
+      p1 = this.pa && this.worldOf(this.pa); p2 = this.pb && this.worldOf(this.pb);
       if (p1 && p2) {
         const d = p2.clone().sub(p1);
-        text = `${d.length().toFixed(2)} cm\nacross ${Math.abs(d.x).toFixed(2)}  up ${Math.abs(d.y).toFixed(2)}  deep ${Math.abs(d.z).toFixed(2)}`;
-      } else if (p1) text = 'click the second point';
+        const snaps = [this.pa?.snapped, this.pb?.snapped].filter(Boolean);
+        text = `${d.length().toFixed(2)} cm  (${(d.length() * 10).toFixed(1)} mm)\nacross ${Math.abs(d.x).toFixed(2)}  up ${Math.abs(d.y).toFixed(2)}  deep ${Math.abs(d.z).toFixed(2)} cm${snaps.length ? `\nfrom ${this.pa?.snapped ?? 'where you clicked'} to ${this.pb?.snapped ?? 'where you clicked'}` : ''}`;
+      } else if (p1) text = `click the second point${this.pa?.snapped ? ` (the first is on ${this.pa.snapped})` : ''}`;
     } else {
       if (this.red && this.host.pinWorld(this.red, tmp)) p1 = tmp.clone();
       if (this.black && this.host.pinWorld(this.black, tmp)) p2 = tmp.clone();

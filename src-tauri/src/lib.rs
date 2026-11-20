@@ -206,6 +206,75 @@ async fn ardu_run(app: tauri::AppHandle, exe: String, args: Vec<String>, job: St
     .map_err(|e| e.to_string())?
 }
 
+// ------------------------------------------------------------------------------------------------
+// Watching a real board's serial output live (arduino-cli monitor): it keeps running until stopped;
+// its lines go to the window as "bench-ardu" events (as above), what's typed goes to its stdin (the
+// board). Only arduino-cli, and only "monitor".
+
+#[derive(Default)]
+struct Monitors {
+    running: Mutex<HashMap<String, (std::process::Child, Option<std::process::ChildStdin>)>>,
+}
+
+#[tauri::command]
+fn ardu_monitor_start(app: tauri::AppHandle, mons: State<'_, Arc<Monitors>>, exe: String, port: String, baud: u32, job: String) -> Result<(), String> {
+    let file = std::path::Path::new(&exe).file_name().map(|f| f.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if file != "arduino-cli.exe" && file != "arduino-cli" {
+        return Err("not arduino-cli".into());
+    }
+    if port.is_empty() || port.len() > 64 || port.starts_with('-') {
+        return Err("no port".into());
+    }
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(["monitor", "-p", &port, "--config", &format!("baudrate={}", baud), "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let out = child.stdout.take().unwrap();
+    let err = child.stderr.take().unwrap();
+    let stdin = child.stdin.take();
+    for (stream, is_err) in [(Box::new(out) as Box<dyn Read + Send>, false), (Box::new(err) as Box<dyn Read + Send>, true)] {
+        let (a, j) = (app.clone(), job.clone());
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stream).lines().map_while(Result::ok) {
+                let _ = a.emit("bench-ardu", ArduLine { job: j.clone(), line, err: is_err });
+            }
+            if !is_err {
+                let _ = a.emit("bench-ardu", ArduLine { job: j.clone(), line: "\u{0}closed".into(), err: true });
+            }
+        });
+    }
+    mons.running.lock().unwrap().insert(job, (child, stdin));
+    Ok(())
+}
+
+#[tauri::command]
+fn ardu_monitor_send(mons: State<'_, Arc<Monitors>>, job: String, text: String) -> Result<(), String> {
+    use std::io::Write;
+    let mut m = mons.running.lock().unwrap();
+    let (_, stdin) = m.get_mut(&job).ok_or("not watching")?;
+    let w = stdin.as_mut().ok_or("no input")?;
+    w.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ardu_monitor_stop(mons: State<'_, Arc<Monitors>>, job: String) -> Result<(), String> {
+    if let Some((mut child, stdin)) = mons.running.lock().unwrap().remove(&job) {
+        drop(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -216,7 +285,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(Web::default()))
-        .invoke_handler(tauri::generate_handler![http_open, http_respond, http_close, ardu_find, ardu_sketch, ardu_run])
+        .manage(Arc::new(Monitors::default()))
+        .invoke_handler(tauri::generate_handler![http_open, http_respond, http_close, ardu_find, ardu_sketch, ardu_run, ardu_monitor_start, ardu_monitor_send, ardu_monitor_stop])
         .run(tauri::generate_context!())
         .expect("error while running Bench Workshop");
 }

@@ -104,6 +104,8 @@ export interface DockHooks {
   sendSerial(uid: string, text: string): void;
   /** put the program on a real board (arduino-cli) */
   realBoard?(uid: string): void;
+  /** save the program as a sketch folder for the Arduino IDE (with a README of board, libraries, wiring) */
+  saveForIde?(uid: string): void;
 }
 
 const h = (tag: string, props: Record<string, any> = {}, ...kids: (Node | string)[]) => {
@@ -132,7 +134,7 @@ export class Dock {
   private plotOn = false;
   private plotBtn = h('button', { textContent: 'Plot', title: 'Graph the numbers the program prints (one line per reading: "12, 40" or "speed:12 target:40")' }) as HTMLButtonElement;
   private plotCanvas = h('canvas', { className: 'dock-plot', width: 420, height: 180 }) as HTMLCanvasElement;
-  private plots = new Map<string, { partial: string; series: Map<string, number[]>; order: string[] }>();
+  private plots = new Map<string, { partial: string; partialReal?: string; series: Map<string, number[]>; order: string[] }>();
   private plotPending = false;
 
   constructor(parent: HTMLElement, private hooks: DockHooks) {
@@ -148,6 +150,7 @@ export class Dock {
     };
     this.el = h('div', { className: 'dock' },
       h('div', { className: 'dock-head' }, this.title, this.lang, this.fwBtn, this.fwNote, h('span', { className: 'spacer' }),
+        h('button', { textContent: 'Save for Arduino IDE...', title: 'Save this program as a sketch folder the Arduino IDE opens, with a README: which board to pick, which libraries to install (and arduino-cli commands), how it is wired, and what to check before building it', onclick: () => { if (this.uid) { this.flush(); hooks.saveForIde?.(this.uid); } } }),
         h('button', { textContent: 'Upload to a real board...', title: 'Compile this program and upload it to a real board on USB (with arduino-cli, which comes with the Arduino IDE)', onclick: () => { if (this.uid) { this.flush(); hooks.realBoard?.(this.uid); } } }),
         h('button', { textContent: 'Clear serial', onclick: () => { if (this.uid) { this.serial.set(this.uid, ''); this.serialPre.textContent = ''; this.plots.delete(this.uid); this.drawPlot(); } } }),
         h('button', { textContent: 'Close', onclick: () => this.close() })),
@@ -265,6 +268,25 @@ export class Dock {
       if (atBottom) this.serialPre.scrollTop = this.serialPre.scrollHeight;
     }
   }
+  /** What the REAL board (on USB) prints, next to the bench's: its lines marked "real|" in the
+   *  monitor, its numbers in the same plot as "real ..." (the same reading, simulated and real). */
+  private realMid = new Map<string, boolean>();
+  appendRealSerial(uid: string, text: string) {
+    this.plotFeed(uid, text, 'real ');
+    // (each line marked once, though it may come in pieces)
+    const mid = this.realMid.get(uid) ?? false;
+    const clean = text.replace(/\r/g, '');
+    const marked = clean.split('\n').map((l, i, all) => ((i === 0 && mid) || (i === all.length - 1 && !l) ? l : `real| ${l}`)).join('\n');
+    this.realMid.set(uid, !clean.endsWith('\n'));
+    let s = (this.serial.get(uid) ?? '') + marked;
+    if (s.length > 40000) s = s.slice(-30000);
+    this.serial.set(uid, s);
+    if (uid === this.uid) {
+      const atBottom = this.serialPre.scrollTop + this.serialPre.clientHeight >= this.serialPre.scrollHeight - 30;
+      this.serialPre.textContent = s;
+      if (atBottom) this.serialPre.scrollTop = this.serialPre.scrollHeight;
+    }
+  }
   serialText(uid: string) {
     return this.serial.get(uid) ?? '';
   }
@@ -277,12 +299,15 @@ export class Dock {
 
   /** the serial plotter reads each whole line: numbers separated by commas, spaces or tabs, each
    *  optionally named ("temp:21.5"); unnamed ones are "1", "2"... (as the Arduino IDE's plotter) */
-  private plotFeed(uid: string, text: string) {
+  private plotFeed(uid: string, text: string, prefix = '') {
     let p = this.plots.get(uid);
     if (!p) this.plots.set(uid, (p = { partial: '', series: new Map(), order: [] }));
-    const lines = (p.partial + text).split('\n');
-    p.partial = lines.pop() ?? '';
-    if (p.partial.length > 2000) p.partial = '';
+    // (the real board's lines come in pieces of their own: their own unfinished line)
+    const part = prefix ? (p.partialReal ?? '') : p.partial;
+    const lines = (part + text.replace(/\r/g, '')).split('\n');
+    const rest = lines.pop() ?? '';
+    if (prefix) p.partialReal = rest.length > 2000 ? '' : rest;
+    else p.partial = rest.length > 2000 ? '' : rest;
     let got = false;
     for (const raw of lines) {
       const line = raw.trim();
@@ -296,10 +321,11 @@ export class Dock {
         else if (/^-?[\d.]+(?:e-?\d+)?$/.test(it) && !Number.isNaN(Number(it))) vals.push([String(++k), Number(it)]);
       }
       if (!vals.length || vals.length < items.length / 2) continue; // (a sentence with a number in it isn't data)
-      for (const [name, v] of vals) {
+      for (const [name0, v] of vals) {
+        const name = prefix + name0;
         let s = p.series.get(name);
         if (!s) {
-          if (p.series.size >= 8) continue;
+          if (p.series.size >= 12) continue;
           p.series.set(name, (s = []));
           p.order.push(name);
         }

@@ -8,6 +8,7 @@
 // inside the engine's step act on each alone (a 1:3 gear train stays exactly 1:3 over minutes).
 import type RAPIER_NS from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { kickAt, kickTwist } from './kicks';
 import type { MechDef } from './parts/types';
 import type { PartView } from './views';
 
@@ -184,8 +185,8 @@ export class Mechanics {
       if (k <= 0) return;
       const lambda = -t.cdot / k;
       const ia = t.pa.n.clone().multiplyScalar(lambda * t.ra), ib = t.nb.clone().multiplyScalar(lambda * t.s * t.rb);
-      if (c.a.rb.isDynamic()) c.a.rb.applyTorqueImpulse({ x: ia.x, y: ia.y, z: ia.z }, true);
-      if (c.b.rb.isDynamic()) c.b.rb.applyTorqueImpulse({ x: ib.x, y: ib.y, z: ib.z }, true);
+      if (c.a.rb.isDynamic()) kickTwist(c.a.rb, { x: ia.x, y: ia.y, z: ia.z }, this.pose(c.a).c);
+      if (c.b.rb.isDynamic()) kickTwist(c.b.rb, { x: ib.x, y: ib.y, z: ib.z }, this.pose(c.b).c);
     }
   }
   /** rA * thetaA + s * rB * thetaB: the surface distance the pair has turned through (constant when
@@ -287,12 +288,12 @@ export class Mechanics {
             const k = over > 1 ? 1 / over : 1;
             const J = new THREE.Vector3();
             for (const { d, j } of js) J.addScaledVector(d, j * k);
-            carrier.applyImpulseAtPoint({ x: J.x, y: J.y, z: J.z }, { x: p.x, y: p.y, z: p.z }, true);
-            if (ob && ob.isDynamic()) ob.applyImpulseAtPoint({ x: -J.x, y: -J.y, z: -J.z }, { x: p.x, y: p.y, z: p.z }, true);
+            kickAt(carrier, { x: J.x, y: J.y, z: J.z }, { x: p.x, y: p.y, z: p.z });
+            if (ob && ob.isDynamic()) kickAt(ob, { x: -J.x, y: -J.y, z: -J.z }, { x: p.x, y: p.y, z: p.z });
             // (the wheel takes the grip's twist about its axle; its holder the opposite)
             const tw = out.clone().multiplyScalar(m.def.radius).cross(J).dot(axle);
-            rb.applyTorqueImpulse({ x: axle.x * tw, y: axle.y * tw, z: axle.z * tw }, true);
-            carrier.applyTorqueImpulse({ x: -axle.x * tw, y: -axle.y * tw, z: -axle.z * tw }, true);
+            kickTwist(rb, { x: axle.x * tw, y: axle.y * tw, z: axle.z * tw }, centre);
+            kickTwist(carrier, { x: -axle.x * tw, y: -axle.y * tw, z: -axle.z * tw }, centre);
             return;
           }
           // a loose wheel (nothing holds its axle): it's pushed itself
@@ -309,8 +310,8 @@ export class Mechanics {
           const k = over > 1 ? 1 / over : 1;
           for (const { d, j } of js) {
             const jj = j * k;
-            rb.applyImpulseAtPoint({ x: d.x * jj, y: d.y * jj, z: d.z * jj }, { x: p.x, y: p.y, z: p.z }, true);
-            if (ob && ob.isDynamic()) ob.applyImpulseAtPoint({ x: -d.x * jj, y: -d.y * jj, z: -d.z * jj }, { x: p.x, y: p.y, z: p.z }, true);
+            kickAt(rb, { x: d.x * jj, y: d.y * jj, z: d.z * jj }, { x: p.x, y: p.y, z: p.z });
+            if (ob && ob.isDynamic()) kickAt(ob, { x: -d.x * jj, y: -d.y * jj, z: -d.z * jj }, { x: p.x, y: p.y, z: p.z });
           }
         });
       });

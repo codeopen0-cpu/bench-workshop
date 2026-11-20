@@ -52,6 +52,9 @@ export interface Device {
   sendSerial?(text: string): void;
   /** about how much current it draws from its supply now, A (for power monitors) */
   current?(): number;
+  /** a power source: what it gives now (V, A), what it can give (A; none: no stated limit), its voltage
+   *  with nothing drawn (for how far it sags) */
+  power?(): { volts: number; amps: number; maxA?: number; open: number };
   /** pin changes on this part's own pins during the last step, in order (a program toggling pins
    *  faster than the simulation steps: clocked chips need every edge) */
   pinEvents?(): [string, 0 | 1][];

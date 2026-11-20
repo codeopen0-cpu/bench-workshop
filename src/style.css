@@ -256,3 +256,21 @@ h3 { margin: 4px 0 8px; font-size: 12px; text-transform: uppercase; letter-spaci
 .rb-out .bad { color: #ff6b6b; }
 .rb-out .warn { color: #f0c24b; }
 .rb-out .ok { color: #5fd38a; font-weight: 600; }
+
+/* the Loads window (ui/loads.ts) */
+.pingraph.loads { left: auto; right: 12px; top: 12px; bottom: auto; width: min(460px, calc(100% - 24px)); box-sizing: border-box; max-height: calc(100% - 24px); overflow: auto; }
+.ld-sub { color: var(--dim); font-size: 11px; margin-right: auto; }
+.ld-kind { margin: 8px 0 3px; font-weight: 600; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.ld-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(50px, 120px) 44px 62px; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.ld-row:hover { background: #ffffff10; }
+.ld-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-bar { position: relative; height: 8px; background: #ffffff14; border-radius: 4px; }
+.ld-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.ld-fill.ok { background: #3fb27f; } .ld-fill.warn { background: #e0b02f; } .ld-fill.bad { background: #e5534b; }
+.ld-peak { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #fff; opacity: .8; }
+.ld-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ld-num.warn { color: #e0b02f; } .ld-num.bad { color: #e5534b; }
+.ld-most { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .pingraph.loads { width: calc(100% - 24px); } .ld-row { grid-template-columns: 1fr 70px 40px; } .ld-most { display: none; } }
+
+.balance-label { border-color: #f2c94c88; }

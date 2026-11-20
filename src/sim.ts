@@ -2,6 +2,7 @@
 // shapes), so glue never wobbles; only real moving joints (servo shafts, motor hubs) are joints, each
 // driven by a motor with the actuator's real torque limit and speed.
 import type RAPIER_NS from '@dimforge/rapier3d-compat';
+import { kickAt, kickTwist } from './kicks';
 import { Mechanics } from './mechanics';
 import { drawThruster, stepThruster, type Thruster } from './thrusters';
 import { placeTrackLinks, type TrackLook } from './parts/mechanics';
@@ -12,14 +13,37 @@ import type { PartView } from './views';
 type R = typeof RAPIER_NS;
 export const STEP = 1 / 240; // physics step, s
 
-interface Member {
+export interface Member {
   view: PartView;
   body: string;
   obj: THREE.Object3D;
   offPos: THREE.Vector3; // body frame relative to its rigid group, at the start
   offRot: THREE.Quaternion;
+  /** `${uid}/${body}` */
+  key: string;
+  /** its mass (g) and the middle of its shapes in its own frame (cm) */
+  mass: number;
+  com: THREE.Vector3;
 }
-interface Group {
+/** Every joint between two rigid pieces (motors' and free ones), so one can be made again when glue
+ *  breaks and a piece it holds becomes a rigid body of its own. */
+export interface JointRec {
+  view: PartView;
+  def: JointDef;
+  ga: Group;
+  gb: Group;
+  /** the member each side belongs to */
+  aKey: string;
+  bKey: string;
+  joint: RAPIER_NS.ImpulseJoint;
+  /** the anchor in each side's rigid-body frame; the axis in both (they share their frame's turn) */
+  la: THREE.Vector3;
+  lb: THREE.Vector3;
+  axis: THREE.Vector3;
+  slide: boolean;
+  act: Actuator | null;
+}
+export interface Group {
   key: string;
   members: Member[];
   rb: RAPIER_NS.RigidBody;
@@ -77,6 +101,8 @@ export class Sim {
   private byKey = new Map<string, Group>();
   private grab: {
     rb: RAPIER_NS.RigidBody; local: THREE.Vector3; target: THREE.Vector3;
+    /** the member it took hold of (glue breaking can take that piece away from the rest) */
+    key: string;
     /** which way it faces about the vertical (rad), turned by Q / E */
     yaw: number;
     /** too heavy to lift: said once */
@@ -164,16 +190,27 @@ export class Sim {
         obj.matrixWorld.decompose(tmpP, tmpQ, tmpS);
         const root = find(keyOf(v.inst.uid, name));
         if (!membersByRoot.has(root)) membersByRoot.set(root, []);
-        membersByRoot.get(root)!.push({ view: v, body: name, obj, offPos: tmpP.clone(), offRot: tmpQ.clone() });
+        const def = v.build.bodies.find((b) => b.name === name)!;
+        // (the middle of its shapes, by their volume: where its mass is)
+        const com = new THREE.Vector3();
+        let vol = 0;
+        for (const c of def.colliders) {
+          const cv = volumeOf(c.shape);
+          com.addScaledVector(new THREE.Vector3(...(c.pos ?? [0, 0, 0])), cv);
+          vol += cv;
+        }
+        if (vol > 0) com.multiplyScalar(1 / vol);
+        const m: Member = { view: v, body: name, obj, offPos: tmpP.clone(), offRot: tmpQ.clone(), key: keyOf(v.inst.uid, name), mass: def.mass, com };
+        membersByRoot.get(root)!.push(m);
+        this.members.set(m.key, m);
       }
     for (const [root, members] of membersByRoot) {
       const fixed = find('WORLD') === root;
       const centre = new THREE.Vector3();
       let massSum = 0;
       for (const m of members) {
-        const bm = m.view.build.bodies.find((b) => b.name === m.body)!.mass;
-        centre.addScaledVector(m.offPos, bm);
-        massSum += bm;
+        centre.addScaledVector(m.offPos, m.mass);
+        massSum += m.mass;
       }
       centre.multiplyScalar(1 / Math.max(massSum, 1e-6));
       const desc = (fixed ? R.RigidBodyDesc.fixed() : R.RigidBodyDesc.dynamic()).setTranslation(centre.x, centre.y, centre.z);
@@ -189,44 +226,14 @@ export class Sim {
       if (!fixed) rb.setAngularDamping(looseBall ? 1.2 : 0.05);
       const g: Group = { key: root, members, rb, fixed };
       for (const m of members) {
-        const def = m.view.build.bodies.find((b) => b.name === m.body)!;
-        const totalVol = def.colliders.reduce((s, c) => s + volumeOf(c.shape), 0) || 1;
-        for (const c of def.colliders) {
-          const lp = new THREE.Vector3(...(c.pos ?? [0, 0, 0])).applyQuaternion(m.offRot).add(m.offPos).sub(centre);
-          const lq = m.offRot.clone().multiply(new THREE.Quaternion(...(c.rot ?? [0, 0, 0, 1])));
-          const s = c.shape;
-          const cd =
-            s.kind === 'box' ? R.ColliderDesc.cuboid(s.hx, s.hy, s.hz)
-            : s.kind === 'cylinder' ? R.ColliderDesc.cylinder(s.halfHeight, s.radius)
-            : s.kind === 'hull'
-              // (a piece of an imported model; if its points make no solid, a small ball stands in)
-              ? R.ColliderDesc.convexHull(s.points) ?? R.ColliderDesc.ball(Math.max(0.05, Math.cbrt(s.volume) / 2))
-            : R.ColliderDesc.ball(s.radius);
-          const vol = volumeOf(s);
-          cd.setTranslation(lp.x, lp.y, lp.z)
-            .setRotation({ x: lq.x, y: lq.y, z: lq.z, w: lq.w })
-            .setDensity((def.mass * (vol / totalVol)) / vol)
-            .setFriction(c.friction ?? 0.7)
-            .setRestitution(c.restitution ?? 0.1);
-          if (c.frictionMin) cd.setFrictionCombineRule(R.CoefficientCombineRule.Min);
-          const col = this.world.createCollider(cd, rb);
-          const bk = keyOf(m.view.inst.uid, m.body);
-          this.colliderOwner.set(col.handle, m.view.inst.uid);
-          if (!this.bodyColliders.has(bk)) this.bodyColliders.set(bk, []);
-          this.bodyColliders.get(bk)!.push(col);
-          if (c.tag) {
-            const k = `${m.view.inst.uid}/${c.tag}`;
-            if (!this.tagged.has(k)) this.tagged.set(k, []);
-            this.tagged.get(k)!.push(col);
-          }
-        }
         m.offPos.sub(centre); // now relative to the body's (world-aligned) origin
-        this.byKey.set(keyOf(m.view.inst.uid, m.body), g);
+        this.makeColliders(m, rb);
+        this.byKey.set(m.key, g);
       }
       this.groups.push(g);
     }
 
-    // 3. joints with motors
+    // 3. joints, with motors where the part has an actuator there
     for (const v of views)
       for (const j of v.build.joints) {
         const ga = this.byKey.get(keyOf(v.inst.uid, j.a))!, gb = this.byKey.get(keyOf(v.inst.uid, j.b))!;
@@ -237,27 +244,25 @@ export class Sim {
         const anchor = new THREE.Vector3(...j.anchor).applyMatrix4(v.root.matrixWorld);
         const axis = new THREE.Vector3(...j.axis).transformDirection(v.root.matrixWorld).normalize();
         const pa = ga.rb.translation(), pb = gb.rb.translation();
-        const la = { x: anchor.x - pa.x, y: anchor.y - pa.y, z: anchor.z - pa.z };
-        const lb = { x: anchor.x - pb.x, y: anchor.y - pb.y, z: anchor.z - pb.z };
-        const slide = j.kind === 'prismatic';
-        const data = slide ? R.JointData.prismatic(la, lb, { x: axis.x, y: axis.y, z: axis.z }) : R.JointData.revolute(la, lb, { x: axis.x, y: axis.y, z: axis.z });
-        const joint = this.world.createImpulseJoint(data, ga.rb, gb.rb, true) as RAPIER_NS.RevoluteImpulseJoint;
-        joint.setContactsEnabled(false);
-        if (slide && !j.actuator) joint.setLimits(-5, 5); // (a slide with no stated travel: a short one)
-        if (!j.actuator) continue;
-        const spec = j.actuator;
-        const start = spec.kind === 'servo' && !spec.byCode ? ((v.inst.params.start ?? 0) * Math.PI) / 180 : 0;
-        const a: Actuator = {
-          id: `${v.inst.uid}/${j.name}`, view: v, def: j, spec, joint, ga, gb, axis, start,
-          target: spec.kind === 'servo' ? start : 0, cmd: start, volts: spec.ratedVolts,
-          angle: start, speed: 0, stalledFor: 0, stallReported: false, electrical: !!spec.byCode, limp: false,
-          total: start, slip: 0, tvel: 0, lastTarget: 0, slide, la: new THREE.Vector3(la.x, la.y, la.z), lb: new THREE.Vector3(lb.x, lb.y, lb.z),
+        const rec: JointRec = {
+          view: v, def: j, ga, gb, aKey: keyOf(v.inst.uid, j.a), bKey: keyOf(v.inst.uid, j.b), joint: null as any,
+          la: new THREE.Vector3(anchor.x - pa.x, anchor.y - pa.y, anchor.z - pa.z),
+          lb: new THREE.Vector3(anchor.x - pb.x, anchor.y - pb.y, anchor.z - pb.z),
+          axis, slide: j.kind === 'prismatic', act: null,
         };
-        joint.configureMotorModel(R.MotorModel.ForceBased);
-        if (spec.kind === 'servo' || (slide && spec.minAngle !== undefined))
-          joint.setLimits((spec.minAngle ?? -Math.PI) - start, (spec.maxAngle ?? Math.PI) - start);
-        this.applyMotor(a);
-        this.actuators.push(a);
+        if (j.actuator) {
+          const spec = j.actuator;
+          const start = spec.kind === 'servo' && !spec.byCode ? ((v.inst.params.start ?? 0) * Math.PI) / 180 : 0;
+          rec.act = {
+            id: `${v.inst.uid}/${j.name}`, view: v, def: j, spec, joint: null as any, ga, gb, axis, start,
+            target: spec.kind === 'servo' ? start : 0, cmd: start, volts: spec.ratedVolts,
+            angle: start, speed: 0, stalledFor: 0, stallReported: false, electrical: !!spec.byCode, limp: false,
+            total: start, slip: 0, tvel: 0, lastTarget: 0, slide: rec.slide, la: rec.la, lb: rec.lb,
+          };
+          this.actuators.push(rec.act);
+        }
+        this.makeJoint(rec);
+        this.joints.push(rec);
       }
 
     // 3b. mechanics: gears, pulleys and belts, tank tracks' wheels, roller wheels (mechanics.ts)
@@ -313,6 +318,183 @@ export class Sim {
 
   private warn(msg: string) {
     this.warnings.push(msg);
+  }
+
+  /** every member (a part's body) by `${uid}/${body}` */
+  members = new Map<string, Member>();
+  /** every joint between rigid pieces */
+  joints: JointRec[] = [];
+  /** which member each collider belongs to (by collider handle) */
+  colliderMember = new Map<number, string>();
+
+  /** A member's shapes on a rigid body (its offPos / offRot: where it sits in that body's frame). */
+  private makeColliders(m: Member, rb: RAPIER_NS.RigidBody) {
+    const R = this.R;
+    const def = m.view.build.bodies.find((b) => b.name === m.body)!;
+    const totalVol = def.colliders.reduce((s, c) => s + volumeOf(c.shape), 0) || 1;
+    const list: RAPIER_NS.Collider[] = [];
+    for (const c of def.colliders) {
+      const lp = new THREE.Vector3(...(c.pos ?? [0, 0, 0])).applyQuaternion(m.offRot).add(m.offPos);
+      const lq = m.offRot.clone().multiply(new THREE.Quaternion(...(c.rot ?? [0, 0, 0, 1])));
+      const s = c.shape;
+      const cd =
+        s.kind === 'box' ? R.ColliderDesc.cuboid(s.hx, s.hy, s.hz)
+        : s.kind === 'cylinder' ? R.ColliderDesc.cylinder(s.halfHeight, s.radius)
+        : s.kind === 'hull'
+          // (a piece of an imported model; if its points make no solid, a small ball stands in)
+          ? R.ColliderDesc.convexHull(s.points) ?? R.ColliderDesc.ball(Math.max(0.05, Math.cbrt(s.volume) / 2))
+        : R.ColliderDesc.ball(s.radius);
+      const vol = volumeOf(s);
+      cd.setTranslation(lp.x, lp.y, lp.z)
+        .setRotation({ x: lq.x, y: lq.y, z: lq.z, w: lq.w })
+        .setDensity((def.mass * (vol / totalVol)) / vol)
+        .setFriction(c.friction ?? 0.7)
+        .setRestitution(c.restitution ?? 0.1);
+      if (c.frictionMin) cd.setFrictionCombineRule(R.CoefficientCombineRule.Min);
+      const col = this.world.createCollider(cd, rb);
+      list.push(col);
+      this.colliderOwner.set(col.handle, m.view.inst.uid);
+      this.colliderMember.set(col.handle, m.key);
+      if (c.tag) {
+        const k = `${m.view.inst.uid}/${c.tag}`;
+        if (!this.tagged.has(k)) this.tagged.set(k, []);
+        this.tagged.get(k)!.push(col);
+      }
+    }
+    this.bodyColliders.set(m.key, list);
+    return list;
+  }
+  /** a member's colliders */
+  collidersOf(key: string) {
+    return this.bodyColliders.get(key) ?? [];
+  }
+  /** the rigid piece a member is in */
+  groupOf(key: string) {
+    return this.byKey.get(key);
+  }
+
+  /** (Re)make a joint between its two rigid bodies, with its limits and motor. */
+  private makeJoint(rec: JointRec) {
+    const R = this.R;
+    const { la, lb, axis } = rec;
+    const data = rec.slide
+      ? R.JointData.prismatic({ x: la.x, y: la.y, z: la.z }, { x: lb.x, y: lb.y, z: lb.z }, { x: axis.x, y: axis.y, z: axis.z })
+      : R.JointData.revolute({ x: la.x, y: la.y, z: la.z }, { x: lb.x, y: lb.y, z: lb.z }, { x: axis.x, y: axis.y, z: axis.z });
+    const joint = this.world.createImpulseJoint(data, rec.ga.rb, rec.gb.rb, true) as RAPIER_NS.RevoluteImpulseJoint;
+    joint.setContactsEnabled(false);
+    rec.joint = joint;
+    const a = rec.act;
+    if (!a) {
+      if (rec.slide) joint.setLimits(-5, 5); // (a slide with no stated travel: a short one)
+      return;
+    }
+    a.joint = joint;
+    a.ga = rec.ga;
+    a.gb = rec.gb;
+    a.la = rec.la;
+    a.lb = rec.lb;
+    joint.configureMotorModel(R.MotorModel.ForceBased);
+    if (a.spec.kind === 'servo' || (rec.slide && a.spec.minAngle !== undefined))
+      joint.setLimits((a.spec.minAngle ?? -Math.PI) - a.start, (a.spec.maxAngle ?? Math.PI) - a.start);
+    this.applyMotor(a);
+  }
+
+  /** wires inside one rigid piece at the start (no rope needed): if glue breaks between their ends,
+   *  they become ropes then. Their ends in their members' own frames. */
+  private latentWires: { id: string; aKey: string; bKey: string; aLocal: THREE.Vector3; bLocal: THREE.Vector3; length: number }[] = [];
+
+  /** Glue gave way: the members in `keys` leave group `g` and become a rigid body of their own, moving
+   *  as they were. Joints, wires, gears, propellers and the hand that held them follow. */
+  splitOff(g: Group, keys: Set<string>): Group | null {
+    const R = this.R;
+    const leaving = g.members.filter((m) => keys.has(m.key));
+    if (!leaving.length || leaving.length === g.members.length) return null;
+    const t = g.rb.translation(), r = g.rb.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    const tv = new THREE.Vector3(t.x, t.y, t.z);
+    // the new body: at its members' middle (in the old body's frame), turned as the old one is now
+    const c = new THREE.Vector3();
+    let mass = 0;
+    for (const m of leaving) {
+      c.addScaledVector(m.offPos, m.mass);
+      mass += m.mass;
+    }
+    c.multiplyScalar(1 / Math.max(mass, 1e-6));
+    const cw = c.clone().applyQuaternion(q).add(tv);
+    const lin = g.rb.linvel(), ang = g.rb.angvel(), com = g.rb.worldCom();
+    const w = new THREE.Vector3(ang.x, ang.y, ang.z);
+    const v = new THREE.Vector3(lin.x, lin.y, lin.z).add(w.clone().cross(cw.clone().sub(new THREE.Vector3(com.x, com.y, com.z))));
+    const desc = R.RigidBodyDesc.dynamic().setTranslation(cw.x, cw.y, cw.z).setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }).setCanSleep(false);
+    const rb = this.world.createRigidBody(desc);
+    rb.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
+    rb.setAngvel({ x: w.x, y: w.y, z: w.z }, true);
+    rb.setLinearDamping(g.fixed ? 0 : g.rb.linearDamping());
+    rb.setAngularDamping(g.fixed ? 0.05 : Math.max(0.05, g.rb.angularDamping()));
+    const ng: Group = { key: `${leaving[0].key}#split${this.groups.length}`, members: leaving, rb, fixed: false };
+    // the members' shapes move over
+    for (const m of leaving) {
+      for (const col of this.bodyColliders.get(m.key) ?? []) {
+        for (const [k, list] of this.tagged) {
+          const i = list.indexOf(col);
+          if (i >= 0) list.splice(i, 1);
+          if (!list.length) this.tagged.delete(k);
+        }
+        this.colliderOwner.delete(col.handle);
+        this.colliderMember.delete(col.handle);
+        this.world.removeCollider(col, false);
+      }
+      m.offPos.sub(c);
+      this.makeColliders(m, rb);
+      this.byKey.set(m.key, ng);
+    }
+    g.members = g.members.filter((m) => !keys.has(m.key));
+    if (!g.fixed) g.rb.recomputeMassPropertiesFromColliders();
+    this.groups.push(ng);
+    // joints: a side that left is now on the new body (its anchor moved in that frame by c)
+    for (const j of this.joints) {
+      const aMoved = keys.has(j.aKey) && j.ga === g, bMoved = keys.has(j.bKey) && j.gb === g;
+      if (!aMoved && !bMoved) continue;
+      this.world.removeImpulseJoint(j.joint, true);
+      if (aMoved) { j.ga = ng; j.la.sub(c); }
+      if (bMoved) { j.gb = ng; j.lb.sub(c); }
+      this.makeJoint(j);
+    }
+    // wires already ropes
+    for (const wr of this.wireRopes) {
+      if (wr.ga === g && keys.has(wr.aKey)) { wr.ga = ng; wr.la.sub(c); }
+      if (wr.gb === g && keys.has(wr.bKey)) { wr.gb = ng; wr.lb.sub(c); }
+    }
+    // wires that were inside one piece and now span two: ropes from now on
+    for (let i = this.latentWires.length - 1; i >= 0; i--) {
+      const lw = this.latentWires[i];
+      const ga = this.byKey.get(lw.aKey), gb = this.byKey.get(lw.bKey);
+      if (!ga || !gb || ga === gb) continue;
+      this.latentWires.splice(i, 1);
+      const ma = this.members.get(lw.aKey)!, mb = this.members.get(lw.bKey)!;
+      const la = lw.aLocal.clone().applyQuaternion(ma.offRot).add(ma.offPos);
+      const lb = lw.bLocal.clone().applyQuaternion(mb.offRot).add(mb.offPos);
+      this.wireRopes.push({ id: lw.id, ga, gb, aKey: lw.aKey, bKey: lw.bKey, la, lb, length: lw.length, peak: 0 });
+      this.ropes++;
+      console.info(`[glue] wire ${lw.id} now joins two pieces: it holds its length (${lw.length.toFixed(1)} cm) from now on`);
+    }
+    // gears, wheels and propellers on the pieces that left
+    for (const it of this.mech.items)
+      if (it.rb === g.rb && keys.has(keyOf(it.view.inst.uid, it.def.body))) {
+        it.rb = rb;
+        it.local.sub(c);
+        it.colliders = this.bodyColliders.get(keyOf(it.view.inst.uid, it.def.body)) ?? [];
+      }
+    for (const th of this.thrusters.values())
+      if (th.rb === g.rb && keys.has(keyOf(th.view.inst.uid, th.def.body))) {
+        th.rb = rb;
+        th.local.sub(c);
+      }
+    if (this.grab && this.grab.rb === g.rb && keys.has(this.grab.key)) {
+      this.grab.rb = rb;
+      this.grab.local.sub(c);
+    }
+    console.info(`[glue] ${leaving.map((m) => m.view.inst.name + (m.body === 'body' ? '' : ` (${m.body})`)).join(', ')} came off as a piece of its own: ${mass.toFixed(0)} g, moving ${v.length().toFixed(1)} cm/s`);
+    return ng;
   }
 
   private applyMotor(a: Actuator) {
@@ -396,18 +578,29 @@ export class Sim {
   ropes = 0;
   /** wires between pieces that move apart: slack is free; pulled tight they pull back, and pulled too
    *  hard they snap (a jumper pulls off its pin) */
-  private wireRopes: { id: string; ga: Group; gb: Group; la: THREE.Vector3; lb: THREE.Vector3; length: number; peak: number }[] = [];
+  private wireRopes: { id: string; ga: Group; gb: Group; aKey: string; bKey: string; la: THREE.Vector3; lb: THREE.Vector3; length: number; peak: number }[] = [];
   /** the pull (N) that snaps a wire: a jumper's pin comes off its header at about this */
   static WIRE_BREAK_N = 5;
   /** a wire snapped: its id, the pull that did it (N) */
   onWireSnap: ((id: string, newtons: number) => void) | null = null;
   /** A wire as a rope between two pins (world points at the start). Wires within one rigid piece need nothing. */
   addWire(id: string, aKey: { uid: string; body: string }, aWorld: THREE.Vector3, bKey: { uid: string; body: string }, bWorld: THREE.Vector3, length: number) {
-    const ga = this.byKey.get(keyOf(aKey.uid, aKey.body)), gb = this.byKey.get(keyOf(bKey.uid, bKey.body));
-    if (!ga || !gb || ga === gb) return false;
+    const ka = keyOf(aKey.uid, aKey.body), kb = keyOf(bKey.uid, bKey.body);
+    const ga = this.byKey.get(ka), gb = this.byKey.get(kb);
+    if (!ga || !gb) return false;
+    if (ga === gb) {
+      // (inside one rigid piece: nothing to do unless glue between its ends breaks)
+      const ma = this.members.get(ka), mb = this.members.get(kb);
+      if (ma && mb) {
+        const t = ga.rb.translation(); // (bodies start world-aligned)
+        const local = (m: Member, p: THREE.Vector3) => new THREE.Vector3(p.x - t.x, p.y - t.y, p.z - t.z).sub(m.offPos).applyQuaternion(m.offRot.clone().invert());
+        this.latentWires.push({ id, aKey: ka, bKey: kb, aLocal: local(ma, aWorld), bLocal: local(mb, bWorld), length: Math.max(length, aWorld.distanceTo(bWorld)) });
+      }
+      return false;
+    }
     const ta = ga.rb.translation(), tb = gb.rb.translation(); // (bodies start world-aligned)
     this.wireRopes.push({
-      id, ga, gb,
+      id, ga, gb, aKey: ka, bKey: kb,
       la: new THREE.Vector3(aWorld.x - ta.x, aWorld.y - ta.y, aWorld.z - ta.z),
       lb: new THREE.Vector3(bWorld.x - tb.x, bWorld.y - tb.y, bWorld.z - tb.z),
       length: Math.max(length, aWorld.distanceTo(bWorld)),
@@ -450,8 +643,8 @@ export class Sim {
         continue;
       }
       const imp = dir.multiplyScalar(f * STEP);
-      if (!r.ga.fixed) r.ga.rb.applyImpulseAtPoint({ x: imp.x, y: imp.y, z: imp.z }, { x: pa.x, y: pa.y, z: pa.z }, true);
-      if (!r.gb.fixed) r.gb.rb.applyImpulseAtPoint({ x: -imp.x, y: -imp.y, z: -imp.z }, { x: pb.x, y: pb.y, z: pb.z }, true);
+      if (!r.ga.fixed) kickAt(r.ga.rb, { x: imp.x, y: imp.y, z: imp.z }, { x: pa.x, y: pa.y, z: pa.z });
+      if (!r.gb.fixed) kickAt(r.gb.rb, { x: -imp.x, y: -imp.y, z: -imp.z }, { x: pb.x, y: pb.y, z: pb.z });
     }
   }
 
@@ -520,10 +713,11 @@ export class Sim {
   grabStart(rbHandleOf: THREE.Object3D, worldPoint: THREE.Vector3) {
     const g = this.groups.find((x) => x.members.some((m) => m.obj === rbHandleOf));
     if (!g || g.fixed) return false;
+    const held = g.members.find((m) => m.obj === rbHandleOf)!;
     const p = g.rb.translation(), q = g.rb.rotation();
     const rq = new THREE.Quaternion(q.x, q.y, q.z, q.w);
     const local = worldPoint.clone().sub(new THREE.Vector3(p.x, p.y, p.z)).applyQuaternion(rq.clone().invert());
-    this.grab = { rb: g.rb, local, target: worldPoint.clone(), yaw: 2 * Math.atan2(rq.y, rq.w), heavyTold: false, strength: this.grip };
+    this.grab = { rb: g.rb, key: held.key, local, target: worldPoint.clone(), yaw: 2 * Math.atan2(rq.y, rq.w), heavyTold: false, strength: this.grip };
     this.handPush(null); // (the palm closes round it: it doesn't also push)
     g.rb.wakeUp();
     const kg = g.rb.mass() / 1000;
@@ -700,7 +894,7 @@ export class Sim {
       }
       // pulled at the point you took it by: lift a board by its edge and it tips, hang a robot by its
       // top and it dangles (as with a real hand)
-      rb.applyImpulseAtPoint({ x: f.x * STEP, y: f.y * STEP, z: f.z * STEP }, { x: p.x, y: p.y, z: p.z }, true);
+      kickAt(rb, { x: f.x * STEP, y: f.y * STEP, z: f.z * STEP }, { x: p.x, y: p.y, z: p.z });
       // turning about the vertical stays where Q / E put it (so it doesn't spin round on its grab
       // point); the other ways it swings freely, calmed a little as a hand would
       const q = rb.rotation();
@@ -712,7 +906,7 @@ export class Sim {
       const kr = Math.min(80, 10 * Math.sqrt(str));
       const tq = new THREE.Vector3(-w.x * 3, err * kr * kr - w.y * 2 * kr, -w.z * 3).multiplyScalar(inertia);
       if (tq.length() > Sim.HAND_TORQUE * str) tq.setLength(Sim.HAND_TORQUE * str);
-      rb.applyTorqueImpulse({ x: tq.x * STEP, y: tq.y * STEP, z: tq.z * STEP }, true);
+      kickTwist(rb, { x: tq.x * STEP, y: tq.y * STEP, z: tq.z * STEP }, p);
     }
     if (this.wireRopes.length) this.pullWires();
     if (this.mech.items.length) this.mech.before(STEP);
@@ -720,6 +914,15 @@ export class Sim {
     this.world.step();
     if (this.mech.items.length) this.mech.after(STEP);
     this.time += STEP;
+    this.stepActuators();
+    // glue: what each glued joint carried this step (and whether it held)
+    this.glue?.afterStep();
+  }
+
+  /** the glue check (glue.ts), set by the app once the bench runs */
+  glue: { afterStep(): void; dispose(): void } | null = null;
+
+  private stepActuators() {
     for (const a of this.actuators) {
       const prev = a.angle;
       a.angle = this.jointAngle(a);
@@ -788,6 +991,8 @@ export class Sim {
   }
 
   dispose() {
+    this.glue?.dispose();
+    this.glue = null;
     this.world.free();
   }
 }

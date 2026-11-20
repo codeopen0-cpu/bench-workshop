@@ -6,6 +6,7 @@
 // about 27 000 rpm loaded and 650 g of thrust, as on a real thrust stand.
 import type RAPIER_NS from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { kickAt, kickTwist } from './kicks';
 import type { ThrusterDef } from './parts/types';
 import type { PartView } from './views';
 
@@ -62,13 +63,21 @@ export function stepThruster(t: Thruster, dt: number) {
   if (t.rb.isDynamic()) {
     // newtons -> g*cm/s^2 (x 1e5); newton-metres -> g*cm^2/s^2 (x 1e7)
     const f = axis.clone().multiplyScalar(t.thrust * 1e5 * dt);
-    t.rb.applyImpulseAtPoint({ x: f.x, y: f.y, z: f.z }, { x: at.x, y: at.y, z: at.z }, true);
+    kickAt(t.rb, { x: f.x, y: f.y, z: f.z }, { x: at.x, y: at.y, z: at.z });
     // the air holds the propeller back, so the motor's case (the frame) turns against its spin: a
     // clockwise propeller (seen from above) turns the frame anticlockwise, about +axis
     const tq = axis.clone().multiplyScalar(t.torque * 1e7 * dt);
-    t.rb.applyTorqueImpulse({ x: tq.x, y: tq.y, z: tq.z }, true);
+    kickTwist(t.rb, { x: tq.x, y: tq.y, z: tq.z }, at);
   }
   t.angle += -t.def.dir * t.omega * dt; // (clockwise seen from above: about -Y)
+}
+
+/** The most it can push (N) at full throttle on the volts its ESC gives it now (or `volts`). */
+export function fullThrust(t: Thruster, volts = t.volts) {
+  const { ct } = coeffs(t.def.propIn, t.def.pitchIn);
+  const D = t.def.propIn * 0.0254;
+  const n = (t.def.kv * volts * 0.8) / 60;
+  return ct * RHO * n * n * D ** 4;
 }
 
 /** Draw the propeller: its blades turning, or a faint disc once it's a blur. */

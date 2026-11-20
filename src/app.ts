@@ -28,6 +28,9 @@ import { CATEGORIES, PART_BY_ID, PARTS } from './parts/catalog';
 import type { PartType, Q4, V3 } from './parts/types';
 import { newProject, newUid, parentFirst, subtree, uniqueName, validate, wireLengthFor, type PartInst, type PinRef, type Project } from './project';
 import { Sim, STEP } from './sim';
+import { DEFAULT_GLUE, findBonds, GlueCheck, GLUES } from './glue';
+import { LoadsPanel, LoadWatch } from './ui/loads';
+import { BalanceView } from './ui/balance';
 import { Stage } from './stage';
 import { HandModel } from './hand';
 import { PinGraph } from './ui/pingraph';
@@ -111,6 +114,12 @@ export class App {
     }
     this.refreshAll();
   }
+  /** weight and balance on the bench (made when first used) */
+  private _balance: BalanceView | null = null;
+  get balance() {
+    if (!this._balance) this._balance = new BalanceView({ stage: this.stage, views: () => this.views, hint: (t) => this.hint(t) });
+    return this._balance;
+  }
   /** the ruler and the multimeter (made when first used) */
   private _ins: Instruments | null = null;
   get ins() {
@@ -123,6 +132,7 @@ export class App {
         pinLabel: (ref) => this.pinLabel(ref),
         hint: (t) => this.hint(t),
         pickRoots: () => [this.mode === 'build' ? this.stage.partsRoot : this.stage.runRoot],
+        shapesOf: (uid, body) => this.views.get(uid)?.build.bodies.find((b) => b.name === body)?.colliders ?? [],
       });
       this._ins.onChange = () => this.refreshAll();
     }
@@ -196,6 +206,8 @@ export class App {
   /** the grab ball (run mode): how it looks; how high it lifts what it holds / the pushing ball rides */
   private hand = new HandModel();
   pinGraph!: PinGraph;
+  loads!: LoadsPanel;
+  loadWatch = new LoadWatch();
   private pushLift = 0;
   private lastPointer: PointerEvent | null = null;
   /** what the mouse moves a held thing across: a plane facing the camera through where it was taken,
@@ -268,6 +280,14 @@ export class App {
     this.stage.overlay.add(this.grabLine);
     this.stage.overlay.add(this.hand.root);
     this.pinGraph = new PinGraph(this.dom.viewport, () => this.views);
+    this.loads = new LoadsPanel({
+      viewport: this.dom.viewport,
+      sim: () => this.sim,
+      circuit: () => this.circuit,
+      glue: () => this.glueCheck,
+      select: (uid) => this.select(uid),
+      log: (m, l) => this.log(m, l),
+    }, this.loadWatch);
     this.rubber = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineDashedMaterial({ color: 0xffd25a, dashSize: 0.3, gapSize: 0.2 }));
     this.rubber.visible = false;
     this.stage.overlay.add(this.rubber);
@@ -282,7 +302,16 @@ export class App {
       boardName: (uid) => this.nameOf(uid),
       canLoadFirmware: (uid) => PART_BY_ID.get(this.instOf(uid)?.type ?? '')?.programmable === 'rp2040',
       loadFirmware: (uid) => this.loadFirmware(uid),
-      sendSerial: (uid, text) => this.circuit?.devices.find((d) => d.view.inst.uid === uid)?.sendSerial?.(text),
+      sendSerial: (uid, text) => {
+        this.circuit?.devices.find((d) => d.view.inst.uid === uid)?.sendSerial?.(text);
+        // (watching the real board too: it gets what's typed as well)
+        void import('./ui/realboard').then((m) => m.realLinks.get(uid)?.mon.send(text.endsWith('\n') ? text : `${text}\n`).catch(() => {}));
+      },
+      saveForIde: (uid) => {
+        let issues: import('./elec/check').Issue[] = [];
+        try { issues = this.checker.check().now; } catch { /* (the check is extra) */ }
+        void import('./ui/arduinoexport').then((m) => m.saveForIde(this.project, this.views, uid, issues, (msg, l) => this.log(msg, l))).catch((e) => this.log(`couldn't save it: ${(e as Error).message}`, 'bad'));
+      },
       realBoard: (uid) => {
         const inst = this.instOf(uid);
         const prog = this.project.programs[uid];
@@ -290,6 +319,7 @@ export class App {
         void import('./ui/realboard').then((m) => m.openRealBoard({
           board: { uid, type: inst.type, name: inst.name, source: prog?.source ?? '', lang: prog?.lang ?? 'arduino' },
           log: (msg, l) => this.log(msg, l),
+          serial: (text) => this.dock.appendRealSerial(uid, text),
         }));
       },
     });
@@ -1039,7 +1069,9 @@ export class App {
     for (const v of this.views.values()) setHighlight(v, false);
     try {
       const views = parentFirst(this.project.parts).map((p) => this.views.get(p.uid)!);
+      const bonds = findBonds(views); // (where each glued part sits: before the bodies move to the run scene)
       this.sim = new Sim(this.R, views, this.stage.runRoot, (m, l) => this.log(m, l), this.project.belts ?? []);
+      this.sim.glue = this.glueCheck = new GlueCheck(this.sim, bonds, this.project.glue ?? DEFAULT_GLUE, (m, l) => this.log(m, l));
       if ((this.project.gravity ?? 1) !== 1) this.sim.setGravity(this.project.gravity ?? 1);
       for (const w of this.project.wires) {
         const va = this.views.get(w.a.uid), vb = this.views.get(w.b.uid);
@@ -1066,6 +1098,7 @@ export class App {
       this.circuit = new Circuit(this.project, views, devices, this.sim, (m, l) => this.log(m, l));
       this.circuit.build();
       this.pinGraph.restart();
+      this.loadWatch.reset();
     } catch (e) {
       this.log(`couldn't start: ${(e as Error).message}`, 'bad');
       console.error(e);
@@ -1109,6 +1142,7 @@ export class App {
   }
   stop() {
     if (this.mode === 'build') return;
+    this.glueCheck = null;
     this.circuit?.dispose();
     this.circuit = null;
     benchAudio.clear();
@@ -1161,6 +1195,7 @@ export class App {
     if (Math.floor(t / 200) !== Math.floor((t - dt * 1000) / 200)) this.refreshReadouts();
     if (this.project.belts?.length || this.beltMeshes.size) this.drawBelts();
     this._ins?.update();
+    this._balance?.update();
     this.stage.render();
     requestAnimationFrame((x) => this.frame(x));
   }
@@ -1661,6 +1696,8 @@ export class App {
   private showGravity = () => {};
   /** keys held down now (lower case): WASD / R F move the camera, carrying what the grab holds */
   private keysDown = new Set<string>();
+  /** the glue check while running (glue.ts) */
+  glueCheck: GlueCheck | null = null;
   private buildToolbar() {
     const b = (key: string, label: string, title: string, fn: () => void, cls = '') => {
       const x = el('button', { textContent: label, title, className: cls, onclick: fn });
@@ -1679,6 +1716,19 @@ export class App {
     };
     gravity.style.cssText = 'background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:4px';
     this.showGravity = () => { gravity.value = String(this.project.gravity ?? 1); if (!gravity.value) gravity.value = '1'; };
+    const glue = el('select', { title: 'How strong the glue is: glued parts come apart when they are pulled, bent or twisted harder than it holds (a crash, a strong servo, the hand)' }) as HTMLSelectElement;
+    for (const [id, g] of Object.entries(GLUES)) glue.append(el('option', { value: id, textContent: `Glue: ${g.name}`, title: g.note }));
+    glue.onchange = () => {
+      this.project.glue = glue.value === DEFAULT_GLUE ? undefined : glue.value;
+      this.dirty = true;
+      this.glueCheck?.setGlue(glue.value);
+      const g = GLUES[glue.value];
+      this.log(`Glue: ${g.name}${isFinite(g.mpa) ? ` (${g.mpa} MPa: ${g.note})` : ` (${g.note})`}`);
+    };
+    glue.style.cssText = gravity.style.cssText;
+    const showGlue = () => { glue.value = this.project.glue ?? DEFAULT_GLUE; };
+    const prevShow = this.showGravity;
+    this.showGravity = () => { prevShow(); showGlue(); };
     const speed = el('select', { title: 'Simulation speed' }) as HTMLSelectElement;
     for (const s of [0.1, 0.25, 0.5, 1, 2]) speed.append(el('option', { value: String(s), textContent: `${s}x`, selected: s === 1 }));
     speed.onchange = () => (this.speed = Number(speed.value));
@@ -1793,6 +1843,7 @@ export class App {
       b('wire', 'Wire', 'Wire tool (C): click a pin, then another pin', () => this.toggleWiring()),
       b('program', 'Program', 'Edit the selected board\'s program, and see its serial monitor', () => this.openProgram()),
       b('ruler', 'Ruler', 'Measure the distance between two points (M)', () => this.ins.setMode('ruler')),
+      b('balance', 'Balance', 'Weight and balance: each build\'s weight, its centre of mass, what it stands on and how far it can lean before it tips over (live while running)', () => { const on = this.balance.toggle(); this.toolbarButtons.balance?.classList.toggle('active', on); }),
       b('meter', 'Meter', 'A multimeter: click a pin for its volts, a second pin for the volts between them; live while running (V)', () => this.ins.setMode('meter')),
       b('api', 'API', 'Control API: let your own programs (Python, scripts) drive the bench at http://127.0.0.1:7420/ (this PC only)', () => void this.toggleApi()),
       b('sheets', 'Parts list', 'What to buy (with rough prices) and a wiring sheet, to build it for real', () => openSheets({ project: () => this.project, views: () => this.views, typeOf: (id) => PART_BY_ID.get(id), stage: this.stage, log: (m, l) => this.log(m, l) })),
@@ -1803,9 +1854,11 @@ export class App {
       b('stop', 'Stop', 'Back to building; everything returns to where you built it (Esc)', () => this.stop(), 'danger'),
       speed,
       gravity,
+      glue,
       soundBtn,
       roomBtn,
       b('pingraph', 'Pin graph', 'Graph pins\' voltages over time while running (a logic analyzer)', () => this.pinGraph.toggle()),
+      b('loads', 'Loads', 'While running: how hard each glue joint, servo, motor, driver, battery and propeller works, of what it can take (find what is too weak before buying it)', () => this.loads.toggle()),
       el('div', { className: 'sep' }),
       gridWrap,
       el('div', { className: 'spacer' }),

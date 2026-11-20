@@ -6,7 +6,7 @@
 const inTauri = () => '__TAURI_INTERNALS__' in window;
 
 /** the boards' support packages, and where the ones not built into arduino-cli are listed */
-const CORES: Record<string, { name: string; url?: string; size: string }> = {
+export const CORES: Record<string, { name: string; url?: string; size: string }> = {
   'arduino:avr': { name: 'Arduino AVR boards (UNO, Nano, Mega)', size: 'about 60 MB' },
   'arduino:renesas_uno': { name: 'Arduino UNO R4 boards', size: 'about 400 MB' },
   'esp32:esp32': { name: 'ESP32 boards (Espressif)', url: 'https://espressif.github.io/arduino-esp32/package_esp32_index.json', size: 'about 1 GB' },
@@ -28,7 +28,7 @@ export const BOARD_FQBN: Record<string, string> = {
   'maker-board': 'rp2040:rp2040:rpipico',
   'rp2040-board': 'rp2040:rp2040:rpipico',
 };
-const CHOICES: [string, string][] = [
+export const CHOICES: [string, string][] = [
   ['arduino:avr:uno', 'Arduino UNO (R3)'], ['arduino:avr:nano', 'Arduino Nano'], ['arduino:avr:mega', 'Arduino Mega 2560'],
   ['arduino:renesas_uno:unor4wifi', 'Arduino UNO R4 WiFi'], ['arduino:renesas_uno:minima', 'Arduino UNO R4 Minima'],
   ['esp32:esp32:esp32', 'ESP32 Dev Module'], ['esp32:esp32:esp32s3', 'ESP32-S3 Dev Module'], ['esp32:esp32:esp32c3', 'ESP32-C3 Dev Module'],
@@ -38,10 +38,13 @@ const CHOICES: [string, string][] = [
 
 // ------------------------------------------------------------------------------- running arduino-cli
 type Line = (line: string, err: boolean) => void;
+interface Monitor { send(text: string): Promise<unknown>; stop(): Promise<unknown> }
 interface Runner {
   find(): Promise<string | null>;
   sketch(name: string, source: string): Promise<string>;
   run(exe: string, args: string[], onLine: Line): Promise<number>;
+  /** arduino-cli monitor on a port, until stopped: each line it prints; onClosed when it ends */
+  monitor(exe: string, port: string, baud: number, onLine: Line, onClosed: () => void): Promise<Monitor>;
 }
 let jobs = 0;
 const tauriRunner: Runner = {
@@ -53,6 +56,20 @@ const tauriRunner: Runner = {
     const job = `j${++jobs}`;
     const off = await listen<{ job: string; line: string; err: boolean }>('bench-ardu', (e) => e.payload.job === job && onLine(e.payload.line, e.payload.err));
     try { return await invoke<number>('ardu_run', { exe, args, job }); } finally { off(); }
+  },
+  async monitor(exe, port, baud, onLine, onClosed) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const { listen } = await import('@tauri-apps/api/event');
+    const job = `m${++jobs}`;
+    const off = await listen<{ job: string; line: string; err: boolean }>('bench-ardu', (e) => {
+      if (e.payload.job !== job) return;
+      if (e.payload.line === '\u0000closed') { off(); onClosed(); } else onLine(e.payload.line, e.payload.err);
+    });
+    try { await invoke('ardu_monitor_start', { exe, port, baud, job }); } catch (e) { off(); throw e; }
+    return {
+      send: (text) => invoke('ardu_monitor_send', { job, text }),
+      stop: () => invoke('ardu_monitor_stop', { job }),
+    };
   },
 };
 /** (while developing: the dev server runs it, see vite.config.ts) */
@@ -66,7 +83,23 @@ const devRunner: Runner = {
     hot.on('bench:ardu-line', got);
     return devAsk<number>('run', { exe, args, job }).finally(() => hot.off?.('bench:ardu-line', got));
   },
+  async monitor(exe, port, baud, onLine, onClosed) {
+    const hot = import.meta.hot!;
+    const job = `m${++jobs}`;
+    const got = (m: { job: string; line: string; err: boolean }) => {
+      if (m.job !== job) return;
+      if (m.line === '\u0000closed') { hot.off?.('bench:ardu-line', got); onClosed(); } else onLine(m.line, m.err);
+    };
+    hot.on('bench:ardu-line', got);
+    try { await devAsk('monitor-start', { exe, port, baud, job }); } catch (e) { hot.off?.('bench:ardu-line', got); throw e; }
+    return { send: (text) => devAsk('monitor-send', { job, text }), stop: () => devAsk('monitor-stop', { job }) };
+  },
 };
+
+/** Real boards being watched live (by bench board): they keep going when the window closes. */
+export const realLinks = new Map<string, { port: string; baud: number; mon: Monitor; uploading?: boolean }>();
+/** what the board's program sets its serial speed to (Serial.begin), else 115200 */
+export const baudOf = (source: string) => Number(/Serial\s*\.\s*begin\s*\(\s*(\d+)/.exec(source)?.[1] ?? 115200);
 function devAsk<T>(op: string, data: object): Promise<T> {
   const hot = import.meta.hot;
   if (!hot) return Promise.reject(new Error('real boards need the desktop app'));
@@ -95,6 +128,8 @@ export interface RealBoardHost {
   /** the bench board: its uid, type, name and program */
   board: { uid: string; type: string; name: string; source: string; lang: string };
   log(msg: string, level?: 'info' | 'warn' | 'bad'): void;
+  /** what the real board prints (watching it live): to its serial monitor, next to the bench's */
+  serial?(text: string): void;
 }
 
 export async function openRealBoard(host: RealBoardHost) {
@@ -121,6 +156,10 @@ export async function openRealBoard(host: RealBoardHost) {
   const btnCompile = el('button', { textContent: 'Check it compiles' }) as HTMLButtonElement;
   const btnUpload = el('button', { className: 'primary', textContent: 'Upload' }) as HTMLButtonElement;
   const btnPorts = el('button', { textContent: 'Find ports', title: 'Look again for boards plugged in by USB' }) as HTMLButtonElement;
+  const baud = el('select', { className: 'rb-select rb-baud', title: 'Serial speed (what the program\'s Serial.begin says)' }) as HTMLSelectElement;
+  for (const x of [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]) baud.append(el('option', { value: String(x), textContent: `${x} baud` }));
+  baud.value = String(baudOf(b.source));
+  const btnWatch = el('button', { title: 'Show what the real board prints in this board\'s serial monitor (and its numbers in Plot, next to the bench\'s), until you stop it. What you type there goes to the real board too.' }) as HTMLButtonElement;
   const fqbn = () => (fq.value === '__other' ? other.value.trim() : fq.value);
   const coreOf = (f: string) => f.split(':').slice(0, 2).join(':');
 
@@ -132,6 +171,7 @@ export async function openRealBoard(host: RealBoardHost) {
     el('div', { className: 'rb-body' },
       el('label', { className: 'rb-row' }, el('span', { textContent: 'Real board' }), fq, other),
       el('label', { className: 'rb-row' }, el('span', { textContent: 'USB port' }), port, btnPorts),
+      el('label', { className: 'rb-row' }, el('span', { textContent: 'Watch it live' }), baud, btnWatch),
       coreNote,
       out),
     el('div', { className: 'lib-foot' }, btnCompile, el('span', { style: 'flex:1' }), btnUpload));
@@ -147,7 +187,7 @@ export async function openRealBoard(host: RealBoardHost) {
   try { exe = await r.find(); } catch (e: any) { say(e.message, 'bad'); }
   if (!exe) {
     say('arduino-cli was not found. Install the Arduino IDE (it includes it) from arduino.cc/en/software, or put arduino-cli on your PATH, then open this again.', 'bad');
-    btnCompile.disabled = btnUpload.disabled = btnPorts.disabled = true;
+    btnCompile.disabled = btnUpload.disabled = btnPorts.disabled = btnWatch.disabled = true;
     return;
   }
   say(`using ${exe}`, 'dim');
@@ -162,6 +202,61 @@ export async function openRealBoard(host: RealBoardHost) {
       if (show && shown) say(shown, err ? 'err' : '');
     }).then((code) => ({ code, text: lines.join('\n') }));
   };
+  // watching the real board's serial live
+  const showWatch = () => {
+    const w = realLinks.get(b.uid);
+    btnWatch.textContent = w ? `Stop watching ${w.port}` : 'Watch its serial';
+    btnWatch.classList.toggle('active', !!w);
+  };
+  const startWatch = async (p: string, bd: number) => {
+    if (realLinks.has(b.uid)) return;
+    if (!host.serial) return say('(this window has no serial monitor to show it in)', 'bad');
+    let partial = '';
+    let lastErr = '';
+    const started = performance.now();
+    const mon = await r.monitor(exe!, p, bd, (line, err) => {
+      const clean = line.replace(/\u001b\[[0-9;]*m/g, '');
+      if (err) {
+        lastErr = clean;
+        say(clean, 'err');
+        console.info(`[realboard] monitor ${p}: ${clean}`);
+        return;
+      }
+      host.serial!(partial + clean + '\n');
+      partial = '';
+    }, () => {
+      const was = realLinks.get(b.uid);
+      if (was && !was.uploading) {
+        realLinks.delete(b.uid);
+        if (performance.now() - started < 4000 && lastErr) host.log(`${b.name}: couldn't watch the real board on ${p}: ${lastErr.replace(/^Port monitor error:\s*/, '')}`, 'warn');
+        else host.log(`${b.name}: stopped watching the real board on ${p} (it was unplugged, or the port closed)`, 'warn');
+        console.info(`[realboard] monitor on ${p} ended`);
+      }
+      showWatch();
+    });
+    realLinks.set(b.uid, { port: p, baud: bd, mon });
+    say(`watching ${p} at ${bd} baud: its lines show in ${b.name}'s serial monitor as "real| ..."`, 'ok');
+    host.log(`${b.name}: watching the real board on ${p} (${bd} baud): its serial output shows next to the bench's (marked "real|"; Plot graphs both)`);
+    console.info(`[realboard] watching ${p} at ${bd}`);
+    showWatch();
+  };
+  const stopWatch = async () => {
+    const w = realLinks.get(b.uid);
+    if (!w) return;
+    realLinks.delete(b.uid);
+    await w.mon.stop().catch(() => {});
+    say(`stopped watching ${w.port}`, 'dim');
+    console.info(`[realboard] stopped watching ${w.port}`);
+    showWatch();
+  };
+  btnWatch.onclick = async () => {
+    try {
+      if (realLinks.has(b.uid)) await stopWatch();
+      else if (!port.value) say('Plug the board in by USB, then Find ports.', 'bad');
+      else await startWatch(port.value, Number(baud.value));
+    } catch (e: any) { say(`couldn't watch it: ${e?.message ?? e}`, 'bad'); }
+  };
+  showWatch();
   const lock = async <T>(f: () => Promise<T>) => {
     busy = true;
     btnCompile.disabled = btnUpload.disabled = btnPorts.disabled = true;
@@ -229,7 +324,11 @@ export async function openRealBoard(host: RealBoardHost) {
     say(`${upload ? 'compiling and uploading' : 'compiling'} for ${f}${upload ? ` on ${port.value}` : ''}...`, 'dim');
     const t0 = performance.now();
     // (no board lists here: an installed core needs none, and they'd be downloaded again each time)
+    // (the port can't be watched and uploaded to at once: let it go, and watch again after)
+    const watching = upload ? realLinks.get(b.uid) : undefined;
+    if (watching) { watching.uploading = true; await watching.mon.stop().catch(() => {}); realLinks.delete(b.uid); say(`(stopped watching ${watching.port} to upload)`, 'dim'); }
     const res = await cli(['compile', '--fqbn', f, ...(upload ? ['--upload', '--port', port.value] : []), dir]);
+    if (watching) { await startWatch(watching.port, watching.baud).catch((e) => say(`couldn't watch it again: ${e?.message ?? e}`, 'bad')); }
     const s = ((performance.now() - t0) / 1000).toFixed(1);
     if (res.code === 0) {
       say(upload ? `uploaded in ${s} s: it's running on the board now` : `it compiles (${s} s)`, 'ok');

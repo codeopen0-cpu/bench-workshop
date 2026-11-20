@@ -23,9 +23,20 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
 - **Run** real physics (Rapier): motors have their real torque, servos stall when the load is too
   heavy, wires have a length, pull what they're attached to and snap if stretched too far. Pick
   things up while it runs (WASD carries them, right-drag turns the camera), shove them with a ball
-  (Shift), and change gravity.
+  (Shift), and change gravity. The mouse wheel flies the camera forward and back (Ctrl + wheel
+  zooms).
+- **Glue that can break:** every glued joint carries what its side weighs and what pushes it (a
+  crash, a strong servo, the hand), worked out each step, against the glue's strength over the
+  glued area (toolbar: Glue: hot glue, superglue, epoxy / screwed, or unbreakable). Past it, that
+  side comes off as a piece of its own.
+- **Loads** (toolbar, while running): how hard each glue joint, servo, motor, motor driver, battery
+  and propeller works, of what it can take, with the most so far; find what's too weak before
+  buying it. **Balance**: each build's weight, centre of mass, what it stands on and how far it can
+  lean before it tips over.
 - **Wire** pins together. Power, shorts, floating inputs and over-voltage are checked as it runs, and
-  **Check** reads the wiring without running it.
+  **Check** reads the wiring without running it, including what works on the bench but not on the
+  real board: ESP32 flash and input-only pins, boot pins, ADC2 with Wi-Fi, the USB serial's pins,
+  ESP8266 / S3 / C3 boot and USB pins, 5 V signals into 3.3 V pins, servos powered through the board.
 - **Program** boards with Arduino-style sketches written in the app (real ESP32 and Arduino sketches
   run as they are: `#if`, structs, lambdas, `String`, `Preferences`, `ledc`...). Time in a sketch
   passes as on the chip: an I2C read takes what it takes on the wire at its clock (`Wire.setClock`),
@@ -53,10 +64,13 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
 - **Sensors that see:** distance (HC-SR04), a thermal camera (AMG8833, with the Adafruit_AMG88xx
   library) that sees warm things, and a 360-degree lidar (RPLidar A1, with its RPLidar library).
 - **Real boards:** upload a sketch to a real board on USB from the program editor (with the
-  arduino-cli that comes with the Arduino IDE).
+  arduino-cli that comes with the Arduino IDE), then watch it live: what the real board prints shows
+  in the same serial monitor (marked `real|`) and Plot as the bench's. **Save for Arduino IDE**: a
+  sketch folder with a README of the board to pick, the libraries to install, and the wiring.
 - **Courses** to test a robot on: ramps and hills, stairs, speed bumps, walls, an arena, rough
   ground, an obstacle field and line tracks.
-- **Measure** with a ruler (M) and a multimeter (V). **Parts list**: what to buy, with rough prices,
+- **Measure** with a ruler (M: it snaps to corners, edges and hole centres, and its ends stay on
+  the parts as they move) and a multimeter (V). **Parts list**: what to buy, with rough prices,
   and a wiring sheet to print.
 - **Control API**: your own programs (Python, test scripts) drive the bench at
   `http://127.0.0.1:7420/` (toolbar: API; this PC only): run, step, read where parts are, press
@@ -125,11 +139,12 @@ and `registry/GUIDE.md` for making a library.
 | `src/parts/catalog.ts` | the parts bin: shape, weight, colliders, joints, motors of every part |
 | `src/project.ts` | the project file: parts, what each is glued to, where |
 | `src/sim.ts` | physics: glued parts are merged into single rigid bodies, actuators are joint motors, wires are ropes |
+| `src/glue.ts` | what each glued joint and motor carries every step (and glue giving way) |
 | `src/elec/` | circuits (nets, drives, I2C), what each part does, programmable boards |
 | `src/sketch/` | sketches: the Arduino-style runtime in its own thread, the C++ to JavaScript translator |
 | `src/kit/` | the emulated RP2040 (rp2040js + I2C target mode + pin-level I2C), chip models, KiCad board loading |
 | `src/lib/` | libraries: the format, the sealed worker their code runs in, installing, KiCad and STL import, publishing |
-| `src/ui/` | windows: libraries, part maker, Check, lessons, pin graph, UI size |
+| `src/ui/` | windows: libraries, part maker, Check, lessons, pin graph, loads, balance, UI size |
 | `src/app.ts` | the app: build and run modes, placing, the grid, grabbing, the inspector, files, undo |
 | `registry/` | the library list: libraries as folders, the safety checker, the pack/check tools |
 | `firmware/rp2040-demo/` | the RP2040 board's demo program (PlatformIO, arduino-pico) |

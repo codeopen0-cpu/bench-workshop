@@ -63,6 +63,7 @@ const boardWeb = (): Plugin => ({
     });
     server.ws.on('bench:http-res', (a: { id: number; status: number; contentType: string; headers: Record<string, string>; body: string }) => waiting.get(a.id)?.(a));
     // real boards (src/ui/realboard.ts): arduino-cli, as the desktop app runs it (src-tauri/src/lib.rs)
+    const monitors = new Map<string, ReturnType<typeof spawn>>();
     server.ws.on('bench:ardu', async (m: { id: string; op: string; name?: string; source?: string; exe?: string; args?: string[]; job?: string }, client) => {
       const done = (result?: unknown, error?: string) => client.send('bench:ardu-done', { id: m.id, result, error });
       try {
@@ -80,6 +81,40 @@ const boardWeb = (): Plugin => ({
           mkdirSync(dir, { recursive: true });
           writeFileSync(join(dir, `${name}.ino`), m.source ?? '');
           return done(dir);
+        }
+        // watching a real board's serial live: arduino-cli monitor, until stopped
+        if (m.op === 'monitor-start') {
+          const a = m as any;
+          if (!/^arduino-cli(\.exe)?$/i.test(basename(a.exe ?? ''))) return done(undefined, 'not arduino-cli');
+          if (!a.port || String(a.port).startsWith('-')) return done(undefined, 'no port');
+          const child = spawn(a.exe, ['monitor', '-p', String(a.port), '--config', `baudrate=${Number(a.baud) || 115200}`, '--quiet'], { windowsHide: true });
+          monitors.set(String(a.job), child);
+          const pipe = (st: NodeJS.ReadableStream, err: boolean) => {
+            let buf = '';
+            st.on('data', (c) => {
+              buf += c;
+              const lines = buf.split(/\r?\n/);
+              buf = lines.pop()!;
+              for (const line of lines) client.send('bench:ardu-line', { job: a.job, line, err });
+            });
+          };
+          pipe(child.stdout, false);
+          pipe(child.stderr, true);
+          child.on('close', () => { monitors.delete(String(a.job)); client.send('bench:ardu-line', { job: a.job, line: '\u0000closed', err: true }); });
+          child.on('error', (e) => client.send('bench:ardu-line', { job: a.job, line: String(e), err: true }));
+          return done(true);
+        }
+        if (m.op === 'monitor-send') {
+          const c = monitors.get(String((m as any).job));
+          if (!c) return done(undefined, 'not watching');
+          c.stdin?.write(String((m as any).text ?? ''));
+          return done(true);
+        }
+        if (m.op === 'monitor-stop') {
+          const c = monitors.get(String((m as any).job));
+          c?.kill();
+          monitors.delete(String((m as any).job));
+          return done(true);
         }
         if (m.op === 'run') {
           if (!/^arduino-cli(\.exe)?$/i.test(basename(m.exe ?? ''))) return done(undefined, 'not arduino-cli');
