@@ -124,7 +124,7 @@ export const lipoPack: PartType = {
   defaults: { cells: '2', mAh: 1500, charge: 100 },
   build: (p) => {
     const s = Number(p.cells) || 2, mAh = Number(p.mAh) || 1500;
-    const h = 0.6 * s + 0.2, d = 3.4, w = Math.max(4, 3 + mAh / 500);
+    const h = 0.75 * s + 0.2, d = 3.4, w = Math.max(4, 3.6 + mAh / 400); // (2S 1500: 73 x 34 x 17 mm, 83 g)
     return {
       pins: leads(w / 2 + 0.6, h / 2, 0, 0.3),
       bodies: [body(Math.round(mAh * s * 0.025 + 8), w, h, d, group(boxMesh(w, h, d, '#7a3fbf', 0, h / 2, 0), boxMesh(0.6, 0.3, 0.9, '#e8e8e8', w / 2 + 0.3, h / 2, 0)))],
@@ -143,10 +143,11 @@ export const powerBank: PartType = {
   defaults: { charge: 100 },
   build: () => ({
     pins: [
-      { id: '+', label: '+ 5V (USB red)', body: 'body', pos: [3.4, 0.6, 0.35], kind: 'vout' },
-      { id: '-', label: '- GND (USB black)', body: 'body', pos: [3.4, 0.6, -0.35], kind: 'gnd' },
+      { id: '+', label: '+ 5V (USB red)', body: 'body', pos: [3.1, 1.0, 0.35], kind: 'vout' },
+      { id: '-', label: '- GND (USB black)', body: 'body', pos: [3.1, 1.0, -0.35], kind: 'gnd' },
     ],
-    bodies: [body(200, 6.6, 1.5, 9.5, group(boxMesh(6.6, 1.5, 9.5, '#2b2d33', 0, 0.75, 0), boxMesh(0.2, 0.5, 1.2, '#b9bec7', 3.3, 0.75, 0)))],
+    // a 10000 mAh one: 92 x 60 x 22 mm, 180 g
+    bodies: [body(180, 6.0, 2.2, 9.2, group(boxMesh(6.0, 2.2, 9.2, '#2b2d33', 0, 1.1, 0), boxMesh(0.2, 0.5, 1.2, '#b9bec7', 3.0, 1.1, 0)))],
     joints: [],
   }),
 };
@@ -163,15 +164,17 @@ export const benchSupply: PartType = {
   ],
   defaults: { volts: 5, amps: 1 },
   build: () => {
-    const front = boxMesh(0.05, 5.5, 13, '#1c1d21', 8.03, 3.5, 0);
-    const knob = (z: number) => cylMesh(0.6, 0.6, '#8a8f99', 8.3, 3, z).rotateZ(Math.PI / 2);
+    // a 30 V switching one: 226 mm deep, 82 wide, 138 tall, 1.34 kg
+    const L = 22.6, H = 13.8, W = 8.2, f = L / 2;
+    const front = boxMesh(0.05, H - 0.8, W - 0.4, '#1c1d21', f + 0.03, H / 2, 0);
+    const knob = (z: number) => cylMesh(0.6, 0.6, '#8a8f99', f + 0.3, 5.2, z).rotateZ(Math.PI / 2);
     return {
       pins: [
-        { id: '+', label: '+ (red terminal)', body: 'body', pos: [8.6, 1.2, 1.0], kind: 'vout' },
-        { id: '-', label: '- (black terminal)', body: 'body', pos: [8.6, 1.2, -1.0], kind: 'gnd' },
+        { id: '+', label: '+ (red terminal)', body: 'body', pos: [f + 0.6, 1.8, 1.0], kind: 'vout' },
+        { id: '-', label: '- (black terminal)', body: 'body', pos: [f + 0.6, 1.8, -1.0], kind: 'gnd' },
       ],
-      bodies: [body(2800, 16, 7, 13, group(boxMesh(16, 7, 13, '#3a3d44', 0, 3.5, 0), front, boxMesh(0.06, 1.2, 6, '#1d3b2a', 8.06, 5.2, 0), knob(-3.5), knob(3.5),
-        cylMesh(0.35, 0.6, '#d23b3b', 8.3, 1.2, 1.0).rotateZ(Math.PI / 2), cylMesh(0.35, 0.6, '#1c1d21', 8.3, 1.2, -1.0).rotateZ(Math.PI / 2)))],
+      bodies: [body(1340, L, H, W, group(boxMesh(L, H, W, '#3a3d44', 0, H / 2, 0), front, boxMesh(0.06, 2.6, 6, '#1d3b2a', f + 0.06, 10.2, 0), knob(-2.2), knob(2.2),
+        cylMesh(0.35, 0.6, '#d23b3b', f + 0.3, 1.8, 1.0).rotateZ(Math.PI / 2), cylMesh(0.35, 0.6, '#1c1d21', f + 0.3, 1.8, -1.0).rotateZ(Math.PI / 2)))],
       joints: [],
     };
   },

@@ -121,8 +121,10 @@ async function ready() {
 // 4. run them, one at a time (a page that crashes on one is opened again for the next)
 const t0 = Date.now();
 const results = [];
+let expected = 0;
 try {
   const ids = await ready();
+  expected = ids.length;
   const info = await evaluate('({ webgl: !!document.createElement("canvas").getContext("webgl2"), isolated: self.crossOriginIsolated })');
   console.log(`page ready (WebGL ${info?.webgl ? 'yes' : 'NO: cameras see nothing'}, threads ${info?.isolated ? 'yes' : 'NO'}); ${ids.length} examples, ${seconds} s each`);
   for (const ex of ids) {
@@ -140,7 +142,11 @@ try {
       try { await call('Page.reload', {}, 5000); } catch { /* */ }
       try { ws.close(); } catch { /* */ }
       await sleep(1500);
-      try { await ready(); } catch (e) { console.log(`  couldn't open the page again: ${e.message}`); break; }
+      try { await ready(); } catch (e) {
+        results.push(r); // (it failed: leaving it out made a run of 7 in 49 pass)
+        console.log(`  couldn't open the page again: ${e.message}`);
+        break;
+      }
     }
     results.push(r);
   }
@@ -208,4 +214,6 @@ if (flag('update')) {
   writeFileSync(BASE, JSON.stringify({ seconds, saved: new Date().toISOString(), results: [...keep, ...results].sort((a, b) => a.id.localeCompare(b.id)) }, null, 1) + '\n');
   console.log(`kept this run as the good one: ${BASE}`);
 }
-process.exit(failed && !flag('update') ? 1 : 0);
+const missed = expected - results.length;
+if (missed > 0 || !expected) console.log(`INCOMPLETE: only ${results.length} of ${expected} examples ran, so this is not a pass`);
+process.exit(missed > 0 || !expected || (failed && !flag('update')) ? 1 : 0);

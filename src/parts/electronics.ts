@@ -102,7 +102,7 @@ export const drv8833: PartType = {
   params: [],
   defaults: {},
   build: () => {
-    const w = 1.9, d = 2.1;
+    const w = 1.85, d = 1.6; // (the common module: 18 x 16 mm)
     return {
       bodies: [{
         name: 'body', pos: [0, 0.08, 0], mass: 2,
@@ -131,11 +131,12 @@ export const l298n: PartType = {
     return {
       bodies: [{
         name: 'body', pos: [0, 0.08, 0], mass: 30,
-        colliders: [{ shape: { kind: 'box', hx: w / 2, hy: 0.08, hz: d / 2 } }, { shape: { kind: 'box', hx: 0.8, hy: 1.1, hz: 0.25 }, pos: [0, 1.15, -0.6] }],
+        colliders: [{ shape: { kind: 'box', hx: w / 2, hy: 0.08, hz: d / 2 } }, { shape: { kind: 'box', hx: 1.15, hy: 1.27, hz: 0.7 }, pos: [0, 1.35, -1.05] }],
         visual: group(
           boxMesh(w, 0.16, d, '#c0392b'),
-          boxMesh(1.6, 2.2, 0.5, '#151618', 0, 1.15, -0.6), // the heatsink-mounted chip
-          boxMesh(1.6, 1.6, 0.15, '#2b2d33', 0, 1.0, -0.95),
+          boxMesh(1.6, 1.8, 0.5, '#151618', 0, 0.98, -0.6), // the chip, screwed to
+          boxMesh(2.3, 2.54, 0.15, '#2b2d33', 0, 1.35, -0.93), // its heatsink (the board is 27 mm tall)
+          ...[-1.075, -0.645, -0.215, 0.215, 0.645, 1.075].map((x) => boxMesh(0.15, 2.54, 0.75, '#2b2d33', x, 1.35, -1.37)),
           boxMesh(1.1, 0.9, 0.8, '#2f6fd1', -1.55, 0.53, -0.3), // screw terminals
           boxMesh(1.1, 0.9, 0.8, '#2f6fd1', 1.55, 0.53, -0.3),
           boxMesh(1.4, 0.9, 0.8, '#2f6fd1', -0.6, 0.53, 1.6),

@@ -65,10 +65,10 @@ export const motionSensor = breakout({
   addrs: [0x68, 0x69],
 });
 export const ioExpander = breakout({
-  id: 'mcp23017', name: 'IO expander (MCP23017)', color: '#2b2d33', w: 5.0, d: 2.2, mass: 4,
+  id: 'mcp23017', name: 'IO expander (MCP23017)', color: '#2b2d33', w: 2.6, d: 2.1, mass: 4, // (CJMCU-2317: 26 x 21 mm, ten pins a side)
   description: '16 extra on/off pins over I2C (A0-A7, B0-B7), each an input (with optional pull-up) or an output.',
-  front: ['VCC', 'GND', 'SCL', 'SDA', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'],
-  back: ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7'],
+  front: ['VCC', 'GND', 'SCL', 'SDA', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
+  back: ['A6', 'A7', 'B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7'],
   addrs: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27],
 });
 export const adcModule = breakout({
@@ -80,7 +80,7 @@ export const adcModule = breakout({
   addrs: [0x48, 0x49, 0x4a, 0x4b],
 });
 export const powerMeter = breakout({
-  id: 'ina226', name: 'Power meter (INA226)', category: 'Sensors', color: '#7b3fa0', w: 2.6, d: 2.0, mass: 3,
+  id: 'ina226', name: 'Power meter (INA226)', category: 'Sensors', color: '#7b3fa0', w: 2.7, d: 2.0, mass: 3,
   description: 'Measures the voltage and current of a supply passing through it: wire the supply to IN+ and the load to IN- (IN+ and IN- are joined through its 0.1 ohm shunt). Reads over I2C.',
   front: ['VCC', 'GND', 'SCL', 'SDA'],
   back: ['IN+', 'IN-'],
@@ -89,7 +89,7 @@ export const powerMeter = breakout({
   addrs: [0x40, 0x41, 0x44, 0x45],
 });
 export const eeprom = breakout({
-  id: 'eeprom-24c02', name: 'Memory (24C02 EEPROM)', color: '#2b2d33', w: 1.8, d: 1.5, mass: 1,
+  id: 'eeprom-24c02', name: 'Memory (24C02 EEPROM)', color: '#2b2d33', w: 1.95, d: 1.14, mass: 1,
   description: '256 bytes that remember what you write to them over I2C (until the run ends).',
   front: ['VCC', 'GND', 'SCL', 'SDA'],
   addrs: [0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57],

@@ -293,27 +293,29 @@ const ttMotor: PartType = {
   defaults: {},
   mountBody: 'case',
   build: () => {
-    const L = 6.4, H = 2.2, D = 1.9;
+    // 70 x 22 x 19 mm, the shaft 11 mm from the gearbox's end, 37 mm over both shafts
+    const H = 2.2, D = 1.9, back = -2.7, front = 4.3, shaftX = -1.6;
     const hubLen = 0.9;
     return {
       pins: [ // the two solder tabs on the motor's end cap
-        { id: 'M+', label: 'Motor +', body: 'case', pos: [L / 2 + 0.05, H / 2 + 0.45, 0], kind: 'motor' },
-        { id: 'M-', label: 'Motor -', body: 'case', pos: [L / 2 + 0.05, H / 2 - 0.45, 0], kind: 'motor' },
+        { id: 'M+', label: 'Motor +', body: 'case', pos: [front + 0.05, H / 2 + 0.45, 0], kind: 'motor' },
+        { id: 'M-', label: 'Motor -', body: 'case', pos: [front + 0.05, H / 2 - 0.45, 0], kind: 'motor' },
       ],
       bodies: [
         {
           name: 'case',
           pos: [0, 0, 0],
           mass: 28,
-          colliders: [{ shape: { kind: 'box', hx: L / 2, hy: H / 2, hz: D / 2 }, pos: [0, H / 2, 0] }],
+          colliders: [{ shape: { kind: 'box', hx: (front - back) / 2, hy: H / 2, hz: D / 2 }, pos: [(front + back) / 2, H / 2, 0] }],
           visual: group(
-            boxMesh(L * 0.62, H, D, '#e8c547', -L * 0.19, H / 2, 0),
-            mesh(new THREE.CylinderGeometry(H * 0.42, H * 0.42, L * 0.4, 24), '#c7c9cc', L * 0.3, H / 2, 0, { metalness: 0.7, roughness: 0.3 }).rotateZ(Math.PI / 2),
+            boxMesh(4.0, H, D, '#e8c547', back + 2.0, H / 2, 0),
+            mesh(new THREE.CylinderGeometry(H * 0.42, H * 0.42, 3.0, 24), '#c7c9cc', front - 1.5, H / 2, 0, { metalness: 0.7, roughness: 0.3 }).rotateZ(Math.PI / 2),
+            mesh(new THREE.CylinderGeometry(0.27, 0.27, hubLen, 12), '#f2f2f2', shaftX, H / 2, -D / 2 - hubLen / 2).rotateX(Math.PI / 2), // the shaft's other end
           ),
         },
         {
           name: 'hub',
-          pos: [-L * 0.25, H / 2, D / 2 + hubLen / 2],
+          pos: [shaftX, H / 2, D / 2 + hubLen / 2],
           rot: ROT_Y_TO_Z,
           mass: 2,
           colliders: [{ shape: { kind: 'cylinder', halfHeight: hubLen / 2, radius: 0.45 } }],
@@ -326,7 +328,7 @@ const ttMotor: PartType = {
           name: 'shaft',
           a: 'case',
           b: 'hub',
-          anchor: [-L * 0.25, H / 2, D / 2],
+          anchor: [shaftX, H / 2, D / 2],
           axis: [0, 0, 1],
           actuator: { kind: 'motor', maxTorque: 0.8, speed: 21, ratedVolts: 6 },
         },

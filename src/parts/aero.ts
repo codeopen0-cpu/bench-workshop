@@ -39,8 +39,9 @@ export const brushlessMotor: PartType = {
   build: (p) => {
     const D = p.prop * 2.54; // cm
     // a motor sized for its propeller (a 5 inch prop: a 2306 motor, about 32 g)
-    const size = Math.max(0.6, Math.min(3, D / 9));
-    const r = 1.4 * size, h = 1.6 * size;
+    // (real ones grow slower than their props: 3 inch = 21 mm, 5 = 29 mm, 10 = 43 mm across)
+    const size = Math.max(0.5, Math.min(2.2, (D / 12.7) ** 0.6));
+    const r = 1.43 * size, h = 1.88 * size;
     const pins: PinDef[] = ['A', 'B', 'C'].map((id, i) => ({ id, label: `Phase ${id}`, body: 'case', pos: [-r * 0.6 + i * r * 0.6, 0.25, r + 0.25] as [number, number, number], kind: 'motor' as const }));
     const prop = propeller(D, p.color);
     prop.position.y = h + 0.5;
