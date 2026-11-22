@@ -178,6 +178,8 @@ export interface LibPart {
 export interface LibSketchFile {
   classes?: string[]; // class names a program declares like C++ objects: "LedControl lc(12, 11, 10, 1);"
   exports?: string[]; // other names a program uses: constants and functions ("NEO_GRB", "makeKeymap")
+  /** what the real header #defines that programs test with #if ({ "OV2640_MINI_2MP": 1 }) */
+  defines?: Record<string, number>;
   code: string; // JavaScript, run inside the program's thread (it sees the Arduino API)
 }
 export interface Library {

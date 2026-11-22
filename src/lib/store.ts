@@ -255,6 +255,7 @@ sketchLibraries.resolve = (includes: string[]) => {
   const libs: { name: string; code: string; exports: string[] }[] = [];
   const classes: string[] = [];
   const missing: string[] = [];
+  const defines: Record<string, number> = {};
   for (const inc of includes) {
     let found = false;
     for (const lib of installed.values()) {
@@ -262,12 +263,13 @@ sketchLibraries.resolve = (includes: string[]) => {
       if (!f) continue;
       libs.push({ name: `${inc} (library "${lib.name}" ${lib.version})`, code: f.code, exports: [...(f.classes ?? []), ...(f.exports ?? [])] });
       classes.push(...(f.classes ?? []));
+      for (const [k, v] of Object.entries(f.defines ?? {})) if (/^[A-Za-z_]\w*$/.test(k) && Number.isFinite(v)) defines[k] = v;
       found = true;
       break;
     }
     if (!found) missing.push(inc);
   }
-  return { libs, classes, missing };
+  return { libs, classes, missing, defines };
 };
 
 // ------------------------------------------------------------------------------------------ your own parts

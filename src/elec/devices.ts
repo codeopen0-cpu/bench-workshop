@@ -31,7 +31,7 @@ const wifiLine = (i: { status: number; ip: string; ap: string | null; server: { 
 
 /** Sketch libraries ("#include <LedControl.h>"): filled in by the library store (lib/store.ts). */
 export const sketchLibraries = {
-  resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[] } => ({ libs: [], classes: [], missing: includes }),
+  resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[]; defines: Record<string, number> } => ({ libs: [], classes: [], missing: includes, defines: {} }),
 };
 const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|ESP32Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|Adafruit_AMG88xx|RPLidar|inc\/rptypes|avr\/.*)\.h$/;
 export const lensMeshes = (v: PartView, flag: string) => {
@@ -366,9 +366,9 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const includes = [...code.matchAll(/^\s*(?:\/\/\s*)?#\s*include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]).filter((x) => !BUILTIN_INCLUDES.test(x));
     const libs = sketchLibraries.resolve(includes);
     for (const m of libs.missing) c.warnOnce(`inc:${uid}:${m}`, `${name(v)}'s program includes ${m}, which no installed library has: find it under Libraries`, 'bad');
-    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences', 'esp_now_peer_info_t', 'BluetoothSerial', 'Adafruit_AMG88xx', 'RPLidar', 'rplidar_response_device_info_t', 'rplidar_response_device_health_t'], { ARDUINO: 10819, ...spec.defines });
+    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences', 'esp_now_peer_info_t', 'BluetoothSerial', 'Adafruit_AMG88xx', 'RPLidar', 'rplidar_response_device_info_t', 'rplidar_response_device_health_t'], { ARDUINO: 10819, ...libs.defines, ...spec.defines });
     else code = code.replace(/^\s*#\s*include.*$/gm, '');
-    const constants: Record<string, number> = { ...spec.defines, ...spec.constants };
+    const constants: Record<string, number> = { ...libs.defines, ...spec.defines, ...spec.constants };
     for (const [id, n] of Object.entries(spec.pins)) if (/^[A-Za-z_]\w*$/.test(id) && !/^GP\d+$/.test(id)) constants[id] = n;
     for (const [id, n] of Object.entries(spec.pins)) {
       const m = /^GP(\d+)$/.exec(id);

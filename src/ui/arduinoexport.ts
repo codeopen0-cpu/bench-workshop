@@ -29,6 +29,8 @@ const LIBS: Record<string, { lib: string; deps?: string[]; note?: string } | nul
   'Adafruit_TCS34725.h': { lib: 'Adafruit TCS34725', deps: ['Adafruit BusIO'] },
   'Adafruit_VL53L0X.h': { lib: 'Adafruit_VL53L0X', deps: ['Adafruit BusIO'] },
   'Adafruit_AMG88xx.h': { lib: 'Adafruit AMG88xx Library', deps: ['Adafruit BusIO'] },
+  'ArduCAM.h': { lib: 'ArduCAM', note: 'in its memorysaver.h leave only your module on (Mini 2MP: #define OV2640_MINI_2MP)' },
+  'memorysaver.h': null,
   'BH1750.h': { lib: 'BH1750' },
   'DFRobotDFPlayerMini.h': { lib: 'DFRobotDFPlayerMini' },
   'DHT.h': { lib: 'DHT sensor library', deps: ['Adafruit Unified Sensor'] },

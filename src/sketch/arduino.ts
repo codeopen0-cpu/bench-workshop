@@ -3,6 +3,8 @@
 // arrays, structs, lambdas, range-for, static locals, casts, integer division of int variables, String
 // methods, objects of library classes. Not a C++ compiler: classes with methods, templates and most
 // pointer work aren't supported.
+import { conditionTrue } from './condition';
+
 const TYPES =
   '(?:void|int|long|short|float|double|bool|boolean|byte|char|String|word|size_t|auto|u?int(?:8|16|32|64)_t)';
 const QUAL = '(?:(?:const|static|volatile|unsigned|signed)\\s+)*';
@@ -25,19 +27,6 @@ function protectStrings(s: string) {
   return { s, restore: (out: string) => saved.reduceRight((acc, x) => acc.split(x.token).join(x.js), out) };
 }
 
-/** The value of an #if condition: defined(X), numbers, the macros known so far (others are 0). */
-function evalCondition(expr: string, defs: Map<string, number>): boolean {
-  let e = expr.replace(/\bdefined\s*\(\s*(\w+)\s*\)|\bdefined\s+(\w+)/g, (_m, a, b) => (defs.has(a ?? b) ? '1' : '0'));
-  e = e.replace(/\b([A-Za-z_]\w*)\b/g, (_m, n) => String(defs.get(n) ?? 0));
-  e = e.replace(/(\d+)[uUlL]+\b/g, '$1');
-  if (!/^[\d\s+\-*/%()<>=!&|~^?:.xXa-fA-F]*$/.test(e)) return false;
-  try {
-    return !!new Function(`return (${e || 0});`)();
-  } catch {
-    return false;
-  }
-}
-
 /** #include, #define, #if / #ifdef / #ifndef / #elif / #else / #endif. Lines in a branch that isn't
  *  taken become empty (line numbers still match the sketch). */
 function preprocess(s: string, boardDefines: Record<string, number>) {
@@ -50,13 +39,13 @@ function preprocess(s: string, boardDefines: Record<string, number>) {
     const [, kw, rest] = d;
     if (kw === 'if' || kw === 'ifdef' || kw === 'ifndef') {
       const parent = on();
-      const yes = kw === 'ifdef' ? defs.has(rest) : kw === 'ifndef' ? !defs.has(rest) : evalCondition(rest, defs);
+      const yes = kw === 'ifdef' ? defs.has(rest) : kw === 'ifndef' ? !defs.has(rest) : conditionTrue(rest, defs);
       stack.push({ active: parent && yes, taken: yes, parent });
       return '';
     }
     if (kw === 'elif') {
       const f = stack[stack.length - 1];
-      if (f) { const yes = !f.taken && evalCondition(rest, defs); f.active = f.parent && yes; f.taken ||= yes; }
+      if (f) { const yes = !f.taken && conditionTrue(rest, defs); f.active = f.parent && yes; f.taken ||= yes; }
       return '';
     }
     if (kw === 'else') {
@@ -70,7 +59,8 @@ function preprocess(s: string, boardDefines: Record<string, number>) {
       const m = /^(\w+)(?:\s+(.+))?$/.exec(rest);
       if (!m || /^\w+\(/.test(rest)) return ''; // (function-like macros: not supported)
       const v = (m[2] ?? '').trim();
-      defs.set(m[1], /^-?\d+(\.\d+)?$/.test(v.replace(/[uUlLfF]+$/, '')) ? Number(v.replace(/[uUlLfF]+$/, '')) : 1);
+      const num = /^0[xX]/.test(v) ? v.replace(/[uUlL]+$/, '') : v.replace(/[uUlLfF]+$/, '');
+      defs.set(m[1], /^(?:-?\d+(?:\.\d+)?|0[xX][0-9A-Fa-f]+)$/.test(num) ? Number(num) : 1);
       return v ? `const ${m[1]} = ${v};` : '';
     }
     if (kw === 'undef') { defs.delete(rest); return ''; }
@@ -109,6 +99,8 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   // comments out (keeping their lines): braces or code in them must not count
   s = s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, '');
   s = preprocess(s, boardDefines);
+  // (before anything looks for arrays: "const char header[66] PROGMEM = {...};")
+  s = s.replace(/\s*\bPROGMEM\b/g, (m) => m.replace(/[^\n]/g, ''));
   // C's many-word integer types as one word each ("long unsigned int rxId;", "long long t;",
   // "short int s;", "signed char c;"): the rules below know the one-word names
   s = s
@@ -162,6 +154,8 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
     .replace(/\bstrcpy\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($2);')
     .replace(/\bstrncpy\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^,;]+?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($2).slice(0, $3);')
     .replace(/\bstrcat\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($1) + String($2);');
+  // numbers into char arrays, the same way: itoa(n, str, 10)
+  s = s.replace(/\b(?:itoa|utoa|ltoa|ultoa)\s*\(\s*([^;,]+?)\s*,\s*([\w.]+)\s*,\s*(\w+)\s*\)\s*;/g, '$2 = Number($1).toString($3);');
   // "using namespace ControlTableItem;" (the names are all there anyway)
   s = s.replace(/^\s*using\s+namespace\s+[\w:]+\s*;/gm, '');
   // ISR attributes (ESP32 / ESP8266): "void IRAM_ATTR onPulse() {"
@@ -314,7 +308,6 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
     return `let ${names.split(',').map((n) => `${n.trim()} = ${zero}`).join(', ')};`;
   });
   // variables (also in "for (int i = 0; ...)"): the type becomes let
-  s = s.replace(/\bPROGMEM\b/g, '');
   s = s.replace(new RegExp(`\\b${QUAL}${TYPES}\\s*\\*?\\s+(?=\\w+\\s*(=|;|,|\\)|\\[))`, 'g'), 'let ');
   // a text held in a char array: "const char page[] = R"(...)";" -> let page = `...`;
   s = s.replace(/(\blet\s+\w+)\s*\[\s*\w*\s*\]\s*=\s*(?=__BW_STR_)/g, '$1 = ');
@@ -325,6 +318,8 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   s = s.replace(/\bsizeof\s*\(\s*(\w+)\s*\)\s*\/\s*sizeof\s*\(\s*\1\s*\[\s*0\s*\]\s*\)/g, '$1.length');
   s = s.replace(/\bF\(\s*(__BW_STR_\d+__\n*)\s*\)/g, '$1');
   s = s.replace(/\bNULL\b/g, 'null');
-  s = s.replace(/\b(0[xX][0-9A-Fa-f]+|\d+(?:\.\d+)?)(?:ULL|ull|LL|ll|UL|ul|L|l|U|u|f)\b/g, '$1');
+  // number suffixes off (in hex an "f" is a digit: 0xff stays 0xff, only 1.5f and 2f lose theirs)
+  s = s.replace(/\b(0[xX][0-9A-Fa-f]+)(?:[uU](?:LL|ll|[lL])?|(?:LL|ll|[lL])[uU]?)\b/g, '$1');
+  s = s.replace(/\b(\d+(?:\.\d+)?)(?:ULL|ull|LL|ll|UL|ul|L|l|U|u|f)\b/g, '$1');
   return prot.restore(s);
 }

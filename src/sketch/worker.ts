@@ -113,7 +113,8 @@ function run(init: Start) {
   /** things the radio delivers while the program waits (ESP-NOW's receive callback) */
   let whileWaiting = () => {};
   const waitUntil = (ms: number) => {
-    if (now() - lastFlush > 30) flush();
+    // (and before a long wait: what it printed last would otherwise show only after it)
+    if (now() - lastFlush > 30 || (serialOut && ms - now() > 30)) flush();
     timed();
     whileWaiting();
     if (ms > now()) local = ms; // (its clock reads ms when the wait is over)
@@ -327,7 +328,16 @@ function run(init: Start) {
       return 1;
     },
     printf(f: string, ...a: any[]) { Serial.print(sprintf(f, ...a)); },
-    write(b: number) { serialOut += String.fromCharCode(b); },
+    /** a byte, a text, or a buffer and how many of it */
+    write(b: any, n?: number) {
+      if (typeof b === 'string') serialOut += n === undefined ? b : b.slice(0, n);
+      else if (b && typeof b === 'object' && typeof b.length === 'number') {
+        const end = Math.min(n ?? b.length, b.length);
+        for (let i = 0; i < end; i++) serialOut += String.fromCharCode(Number(b[i]) & 255);
+      } else serialOut += String.fromCharCode(Number(b) & 255);
+      if (serialOut.length > 4000) flush();
+      return 1;
+    },
     available() {
       const h = Atomics.load(ctl, CTL.SERIAL_HEAD), t = Atomics.load(ctl, CTL.SERIAL_TAIL);
       return (h - t + 1024) % 1024;
@@ -1073,8 +1083,10 @@ function run(init: Start) {
   const spiExchange = (bytes: number[]): number[] => {
     spiCheck();
     const out: number[] = [];
-    for (let i = 0; i < bytes.length; i += 500) {
-      const chunk = bytes.slice(i, i + 500);
+    // (the request area holds the pin levels and then the bytes: more would be cut off)
+    const room = sh.req.length - SPI_SNAP;
+    for (let i = 0; i < bytes.length; i += room) {
+      const chunk = bytes.slice(i, i + room);
       spend((chunk.length * 8) / 4000 + 0.005); // (8 clocks a byte at a usual 4 MHz)
       const r = request(REQ.SPI, chunk.length, 0, 0, [...snap(), ...chunk]);
       for (let j = 0; j < chunk.length; j++) out.push(r.status === 0 ? (r.data[j] ?? 0xff) : 0xff);
@@ -1165,6 +1177,9 @@ function run(init: Start) {
   // ------------------------------------------------------------------------------- C++ bits
   // (what translated sketches call: fixed-size number casts, chars, structs, String's C++ methods)
   const i16 = (x: number) => (Math.trunc(Number(x)) << 16) >> 16;
+  // (flash memory is plain memory here: "pgm_read_byte(&table[i])" is handed the value itself)
+  const flash = (x: any) => (typeof x === 'string' ? x.charCodeAt(0) || 0 : Number(x instanceof Ref ? x.value : x) || 0);
+  Object.assign(api, { pgm_read_byte: flash, pgm_read_byte_near: flash, pgm_read_word: flash, pgm_read_word_near: flash, pgm_read_dword: flash });
   Object.assign(api, {
     __i16: i16,
     __i8: (x: number) => (Math.trunc(Number(x)) << 24) >> 24,
