@@ -113,7 +113,9 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
     .replace(/\bsigned\s+char\b/g, 'int8_t')
     .replace(/\bsigned\s+int\b/g, 'int')
     // (the ESP32's own names for plain numbers: esp_err_t result = esp_now_send(...);)
-    .replace(/\b(?:esp_err_t|esp_now_send_status_t|wl_status_t|wifi_mode_t|wifi_interface_t|gpio_num_t|u_result|_u8|_u16|_u32)\b(?=\s+\w)/g, 'int')
+    .replace(/\b(?:esp_err_t|esp_now_send_status_t|wl_status_t|wifi_mode_t|wifi_interface_t|gpio_num_t|u_result|_u8|_u16|_u32|i2s_port_t|i2s_mode_t|i2s_bits_per_sample_t|i2s_channel_fmt_t|i2s_comm_format_t|i2s_data_bit_width_t|i2s_slot_mode_t)\b(?=\s+\w)/g, 'int')
+    // casts to the ESP-IDF's other named types ("(i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX)"): numbers here
+    .replace(/\(\s*(?!(?:u?int(?:8|16|32|64)_t|size_t)\b)[a-z]\w*_t\s*\)\s*(?=[\w(])/g, '')
     // pointer casts: "(uint8_t *) &myData", "(const char*)buf", "(byte *) data" (in JS the thing itself)
     .replace(/\(\s*(?:const\s+)?(?:unsigned\s+)?[A-Za-z_]\w*\s*\*+\s*\)\s*(?=[&\w("'])/g, '');
   // structs: a class whose fields start at zero ("struct Move { float from[5]; uint32_t t0; } mv = {};")
@@ -149,6 +151,10 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
     }).join(' ') : '';
     return `class ${name} { constructor() { ${init.join(' ')} } } ${alias} ${decls}` + '\n'.repeat(lines);
   });
+  // designated initializers (C99; the ESP-IDF's config structs): "i2s_config_t cfg = { .mode = X,
+  // .sample_rate = 16000 };" -> let cfg = { mode: X, sample_rate: 16000 }; (nested ".pins = { .a = 1 }" too)
+  s = s.replace(/^(\s*)(?:(?:static|const|constexpr)\s+)*(?:struct\s+)?[A-Za-z_][\w:]*\s+(\w+)\s*=\s*\{(?=\s*\.[A-Za-z_]\w*\s*=)/gm, (_m, ind: string, n: string) => `${ind}let ${n} = {`);
+  s = s.replace(/([{,]\s*)\.([A-Za-z_]\w*)\s*=(?!=)/g, '$1$2:');
   // C's string copies into char arrays (texts here): strcpy(dst, src) / strncpy(dst, src, n) / strcat
   s = s
     .replace(/\bstrcpy\s*\(\s*([\w.]+(?:\[[^\]]*\])?)\s*,\s*([^;]+?)\)\s*;/g, '$1 = String($2);')
@@ -206,12 +212,19 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   // and on a plain operand: "(int)pixels[i]", "(byte)x", "(long)obj.read()" (a cast binds tightest)
   s = s.replace(/\(\s*(int16_t|int8_t|uint8_t|byte|uint16_t|unsigned\s+short|uint32_t|unsigned\s+long|unsigned\s+int|int|long|short|int32_t)\s*\)\s*([A-Za-z_\d][\w.]*(?:\([^()]*\))?(?:\[[^\]]*\])*)/g,
     (_m, t: string, x: string) => `${CASTS[t.replace(/\s+/, ' ')]}(${x})`);
-  // "(float)k / 2": a fraction (not whole-number division of an int)
+  // "(float)k / 2": a fraction (not whole-number division of an int); "(float)(a - b)" too
+  s = s.replace(/\(\s*(?:float|double)\s*\)\s*\(/g, 'Number(');
   s = s.replace(/\(\s*(?:float|double)\s*\)\s*([A-Za-z_\d][\w.]*(?:\([^()]*\))?(?:\[[^\]]*\])*)/g, '(+$1)');
   // whole-number division of int variables: C++ drops the fraction ("y / 8" with int y)
   for (const m of s.matchAll(new RegExp(`\\b(?:(?:const|static|volatile|unsigned|signed)\\s+)*${INT_T}\\s+(\\w+)\\s*(?=[=;,)])`, 'g'))) ints.add(m[1]);
   for (const m of s.matchAll(new RegExp(`\\b(?:float|double)\\s+(\\w+)\\s*(?=[=;,)\\[])`, 'g'))) ints.delete(m[1]);
-  s = s.replace(/(?<![\w.])([A-Za-z_]\w*)\s*\/\s*([A-Za-z_]\w*|\d+)(?![\w.(\[])/g, (m0, a: string, b: string) =>
+  // a product of whole numbers divided: "c * a / b" (all int) is (c * a) / b, dropping the fraction
+  s = s.replace(/(?<![\w.])(?<![*/%]\s*)((?:[A-Za-z_]\w*|\d+)(?:\s*[*%]\s*(?:[A-Za-z_]\w*|\d+))+)\s*\/\s*([A-Za-z_]\w*|\d+)(?![\w.(\[])/g, (m0, chain: string, b: string) => {
+    const whole = (t: string) => /^\d+$/.test(t) || ints.has(t);
+    return chain.split(/\s*[*%]\s*/).every(whole) && whole(b) ? `Math.trunc(${chain} / ${b})` : m0;
+  });
+  // (not when a product comes first: "2 * PI * hz / RATE" is (2 * PI * hz) / RATE, a fraction)
+  s = s.replace(/(?<![\w.])(?<![*/%]\s*)([A-Za-z_]\w*)\s*\/\s*([A-Za-z_]\w*|\d+)(?![\w.(\[])/g, (m0, a: string, b: string) =>
     ints.has(a) && (/^\d+$/.test(b) || ints.has(b)) ? `Math.trunc(${a} / ${b})` : m0);
   // (and millis() / 1000: millis() is a whole number, so is what it's divided into)
   s = s.replace(/\b(millis|micros)\(\s*\)\s*\/\s*(\d+)(?![\w.])/g, 'Math.trunc($1() / $2)');
@@ -264,10 +277,13 @@ export function arduinoToJs(src: string, classes: string[] = [], boardDefines: R
   s = s.replace(/([^=!<>]=\s*)&(?=[A-Za-z_])/g, '$1');
   // arrays: "int notes[] = {1, 2};" / "int buf[8];" / "const char *NAMES[3] = {...};" / "uint8_t fb[128 * 64 / 8];"
   const arrays = new Set<string>();
-  s = s.replace(new RegExp(`\\b${QUAL}${TYPES}(?:\\s+|\\s*\\*\\s*)(\\w+)\\s*(\\[[^\\]]*\\])+\\s*=\\s*\\{([^}]*)\\}`, 'g'), (_m, n, _d, items) => { arrays.add(n); return `let ${n} = [${items}]`; });
+  // (16- and 32-bit arrays carry their element size: a byte count handed with them, as I2S's, needs it)
+  const width = (n: string) => { const t = declared.get(n)?.type ?? ''; return /^u?u?int16_t$/.test(t) ? 2 : /^u?u?int32_t$/.test(t) ? 4 : 0; };
+  const sized = (n: string, arr: string) => (width(n) ? `__sized(${arr}, ${width(n)})` : arr);
+  s = s.replace(new RegExp(`\\b${QUAL}${TYPES}(?:\\s+|\\s*\\*\\s*)(\\w+)\\s*(\\[[^\\]]*\\])+\\s*=\\s*\\{([^}]*)\\}`, 'g'), (_m, n, _d, items) => { arrays.add(n); return `let ${n} = ${sized(n, `[${items}]`)}`; });
   // ("float a[2] = {1, 2}, b[2] = {3, 4};": the ones after the first)
   for (let i = 0; i < 8; i++) s = s.replace(/(=\s*\[[^\]]*\])\s*,\s*(\w+)\s*\[[^\]]*\]\s*=\s*\{([^}]*)\}/g, (_m, a, n, items) => { arrays.add(n); return `${a}, ${n} = [${items}]`; });
-  s = s.replace(new RegExp(`\\b${QUAL}${TYPES}(?:\\s+|\\s*\\*\\s*)(\\w+)\\s*\\[\\s*([^\\]]+?)\\s*\\]\\s*;`, 'g'), (_m, n, size) => { arrays.add(n); return `let ${n} = new Array(${size}).fill(0);`; });
+  s = s.replace(new RegExp(`\\b${QUAL}${TYPES}(?:\\s+|\\s*\\*\\s*)(\\w+)\\s*\\[\\s*([^\\]]+?)\\s*\\]\\s*;`, 'g'), (_m, n, size) => { arrays.add(n); return `let ${n} = ${sized(n, `new Array(${size}).fill(0)`)};`; });
   // a pointer into an array handed to a function ("Wire.write(fb + i, 16)"): the rest of it from there
   s = s.replace(/([(,]\s*)([A-Za-z_]\w*)\s*\+\s*([\w.]+)(?=\s*[,)])/g, (m0, pre: string, a: string, i: string) => (arrays.has(a) ? `${pre}${a}.slice(${i})` : m0));
   // object declarations: "Servo arm;" / "Servo a, b;"

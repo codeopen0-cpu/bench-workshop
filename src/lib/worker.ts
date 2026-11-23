@@ -128,7 +128,8 @@ function doSpi(m: { uid: string; bytes: number[]; pins: any; id?: number }): num
 // The mailbox shared with the app (lib/runtime.ts): an I2C transfer, or an SPI one that wants
 // answers, arrives here while the program that asked waits, and is answered at once (not through
 // the app's message queue, which would hold it up until the app's next frame).
-// ctl[0]: 0 empty, 1 a question waits, 2 its answer waits; ctl[1]: bytes of JSON in buf.
+// ctl[0]: 0 empty, 1 a question waits, 2 its answer waits; ctl[1]: bytes of JSON in buf;
+// ctl[2]: steps done (heartbeat); ctl[3]: 1 once its code has started.
 let mail: { ctl: Int32Array; buf: Uint8Array } | null = null;
 let spiDone = 0; // SPI messages without answers handled so far (a question comes after those sent before it)
 let mailHeld: any = null;
@@ -174,6 +175,7 @@ self.onmessage = (e: MessageEvent) => {
     try {
       new Function('bench', '"use strict";\n' + m.code)(bench);
       post({ t: 'ready', devices: [...makers.keys()] });
+      if (mail) Atomics.store(mail.ctl, 3, 1);
     } catch (err: any) {
       post({ t: 'error', message: `its code failed to start: ${err?.message ?? err}` });
     }
@@ -453,6 +455,9 @@ self.onmessage = (e: MessageEvent) => {
       out[uid] = o;
     }
     post({ t: 'out', parts: out });
+    // (a heartbeat the app reads straight from shared memory: its messages can sit unread while the
+    // app is busy stepping, which made a working library look stuck)
+    if (mail) Atomics.add(mail.ctl, 2, 1);
   } else if (m.t === 'ctl') {
     // the run panel: a control was used
     const c = insts.get(m.uid)?.ctls.get(m.id);

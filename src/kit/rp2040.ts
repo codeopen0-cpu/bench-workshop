@@ -148,8 +148,8 @@ export function rp2040Device(v: PartView, spec: Rp2040Spec, hooks: DeviceHooks, 
         }
       };
       worker.onerror = (e) => {
-        crashed = e.message;
-        hooks.log(`${v.inst.name}: the emulated chip stopped: ${e.message}`, 'bad');
+        crashed = e.message || 'its worker could not be loaded (the app files are missing or the app is closing)';
+        hooks.log(`${v.inst.name}: the emulated chip stopped: ${crashed}`, 'bad');
       };
       worker.postMessage({ type: 'start', sab: sh.sab, uf2: bytes });
       hooks.serial(uid, `[running ${fwName} on an emulated RP2040]\n`);

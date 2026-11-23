@@ -58,8 +58,9 @@ class LibRun {
     this.worker = new LibWorker();
     this.worker.onmessage = (e) => this.msg(e.data);
     this.worker.onerror = (e) => {
-      this.failed = e.message;
-      this.log(`library "${lib.name}": ${e.message}`, 'bad');
+      // (a worker that couldn't even load gives no message)
+      this.failed = e.message || 'its worker could not be loaded (the app files are missing or the app is closing)';
+      this.log(`library "${lib.name}": ${this.failed}`, 'bad');
     };
     let sab: SharedArrayBuffer | undefined;
     if (typeof SharedArrayBuffer !== 'undefined' && (self as any).crossOriginIsolated !== false) {
@@ -144,9 +145,11 @@ class LibRun {
   step(c: Circuit, uid: string, input: any) {
     if (this.failed) return;
     // a library that stops answering (an endless loop?) is stopped, so the app doesn't wait forever
-    if (this.sent > this.answered && performance.now() - this.lastAnswer > 3000) {
-      this.failed = 'it stopped responding (an endless loop?) and was shut down';
+    const stuck = this.stuck();
+    if (stuck) {
+      this.failed = stuck;
       this.log(`library "${this.lib.name}": ${this.failed}`, 'bad');
+      console.warn(`[library] ${this.lib.id} shut down: ${stuck} (steps sent ${this.sent}, done ${this.mail ? Atomics.load(this.mail.ctl, 2) : this.answered}, started ${this.mail ? Atomics.load(this.mail.ctl, 3) === 1 : this.ready})`);
       this.worker.terminate();
       for (const r of this.i2cWait.values()) r({ ok: false, data: null });
       this.i2cWait.clear();
@@ -154,9 +157,34 @@ class LibRun {
       this.spiWait.clear();
       return;
     }
-    if (this.sent === this.answered) this.lastAnswer = performance.now();
     this.sent++;
     this.worker.postMessage({ t: 'step', time: c.time, parts: { [uid]: input } });
+  }
+  private born = performance.now();
+  private beat = 0;
+  private beatAt = performance.now();
+  /** why it counts as stuck, or null. Judged by the worker's own heartbeat in shared memory: its
+   *  messages can sit unread while the app is busy stepping (a long advance(), a heavy build), which
+   *  used to shut down libraries that were working. Its code gets 20 s to start (a busy PC). */
+  private stuck(): string | null {
+    const now = performance.now();
+    const STUCK = 'it stopped responding (an endless loop?) and was shut down';
+    const NEVER = 'its code never finished starting (an endless loop?) and was shut down';
+    const m = this.mail;
+    if (m) {
+      if (Atomics.load(m.ctl, 3) !== 1) return now - this.born > 20000 ? NEVER : null;
+      const done = Atomics.load(m.ctl, 2);
+      if (done !== this.beat || done >= this.sent) {
+        this.beat = done;
+        this.beatAt = now;
+        return null;
+      }
+      return now - this.beatAt > 3000 ? STUCK : null;
+    }
+    // (no shared memory: by its messages, which can be late, so allow longer)
+    if (!this.ready) return now - this.born > 20000 ? NEVER : null;
+    if (this.sent === this.answered) this.lastAnswer = now;
+    return this.sent > this.answered && now - this.lastAnswer > 8000 ? STUCK : null;
   }
   /** an SPI transfer to one of its parts: posted in order with everything else; the answer comes back
    *  (when the program waits for one) */

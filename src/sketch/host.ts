@@ -32,7 +32,7 @@ export class SketchHost {
   state = 'starting';
   error: string | null = null;
 
-  constructor(code: string, constants: Record<string, number>, analogPins: number[], libs: { name: string; code: string; exports: string[] }[], private ev: HostEvents, wifi = false, wifiWaits = false, board: { adcBits?: number; pwmPins?: number[] } = {}) {
+  constructor(code: string, constants: Record<string, number>, analogPins: number[], libs: { name: string; code: string; exports: string[] }[], private ev: HostEvents, wifi = false, wifiWaits = false, board: { adcBits?: number; pwmPins?: number[]; matrix?: boolean; ble?: boolean; i2s?: boolean } = {}) {
     this.sh.ctl[CTL.PARK] = -1;
     this.worker = new SketchWorker();
     this.worker.onmessage = (e) => {
@@ -53,7 +53,7 @@ export class SketchHost {
       this.error = e.message;
       ev.error(e.message, null);
     };
-    this.worker.postMessage({ type: 'start', sab: this.sh.sab, code, constants, analogPins, libs, wifi, wifiWaits, adcBits: board.adcBits, pwmPins: board.pwmPins, fineTime: SketchHost.fineTiming });
+    this.worker.postMessage({ type: 'start', sab: this.sh.sab, code, constants, analogPins, libs, wifi, wifiWaits, adcBits: board.adcBits, pwmPins: board.pwmPins, matrix: board.matrix, ble: board.ble, i2s: board.i2s, fineTime: SketchHost.fineTiming });
   }
 
   /** Simulation time moved on: wake the program if it's waiting. */

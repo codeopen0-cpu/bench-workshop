@@ -2,7 +2,10 @@
 // delay, Servo, Wire, Serial...) and talks to the simulation through shared memory (layout.ts).
 // Time is the SIMULATION's time: delay(1000) waits one simulated second, and pausing the simulation
 // pauses the program.
-import { CTL, ESPNOW_PIN, EVENTS, IN_EVENTS, MODE, PINS, REQ, SPI_SNAP, Shared, protoCode, ringRead, ringWrite } from './layout';
+import { BLE_PIN, CTL, ESPNOW_PIN, EVENTS, IN_EVENTS, MATRIX_PIN, MODE, PINS, REQ, SPI_SNAP, Shared, protoCode, ringRead, ringWrite } from './layout';
+import { LEDMATRIX_GALLERY } from './ledmatrix-gallery';
+import { BLE_PROPS, BLE_SIZE, bleDecode, bleEncode, type BleKind } from './blecodec';
+import { MATRIX_FONTS } from './ledmatrix-fonts';
 
 interface Start {
   type: 'start';
@@ -19,6 +22,12 @@ interface Start {
   pwmPins?: number[];
   /** false: every wait and bus transfer takes a whole simulation step (before 0.14; for comparing) */
   fineTime?: boolean;
+  /** it has the UNO R4 WiFi's 12 x 8 LED matrix (Arduino_LED_Matrix.h) */
+  matrix?: boolean;
+  /** it has Bluetooth LE (ArduinoBLE.h): UNO R4 WiFi, ESP32s */
+  ble?: boolean;
+  /** it has I2S sound out (ESP_I2S.h, driver/i2s.h): ESP32s */
+  i2s?: boolean;
 }
 
 self.onmessage = (e: MessageEvent<Start>) => {
@@ -76,8 +85,11 @@ function run(init: Start) {
   const toneEnds = new Map<number, number>();
   const isrs = new Map<number, { fn: () => void; mode: number; last: number }>();
   let inIsr = false;
+  /** things a timer does on the real board (the LED matrix playing an animation) */
+  const tickers: (() => void)[] = [];
   const timed = () => {
     if (inIsr) return;
+    for (const t of tickers) t();
     for (const [p, end] of toneEnds)
       if (now() >= end) {
         toneEnds.delete(p);
@@ -755,6 +767,717 @@ function run(init: Start) {
   }
   Object.assign(api, { BluetoothSerial });
 
+  // ------------------------------------------------------------------------------- the UNO R4 WiFi's LED matrix
+  // Arduino_LED_Matrix.h (+ ArduinoGraphics.h for text and shapes), as Arduino's own code does it
+  // (tools/vendor/ledmatrix): 96 LEDs, 12 a row, 8 rows; a picture is 3 words, LED 0 = the first
+  // word's top bit. What it shows goes to the board in the simulation (MATRIX_PIN) when it changes.
+  let matrixShown = '';
+  let matrixFrames = 0;
+  const matrixShow = (words: number[]) => {
+    const bytes = new Array(12).fill(0);
+    for (let i = 0; i < 96; i++) if ((((words[i >> 5] ?? 0) >>> (31 - (i & 31))) & 1) === 1) bytes[i >> 3] |= 1 << (i & 7);
+    const key = bytes.join(',');
+    if (key === matrixShown) return;
+    matrixShown = key;
+    if (!init.matrix) return;
+    matrixFrames++;
+    const raw = { pin: MATRIX_PIN, proto: protoCode('data'), baud: 0, data: bytes };
+    while (!ringWrite(sh.pktOut, ctl, CTL.PKO_HEAD, CTL.PKO_TAIL, raw)) {
+      const s = Atomics.load(ctl, CTL.STEP);
+      Atomics.wait(ctl, CTL.STEP, s, 50);
+    }
+  };
+  const unref = (a: any): any => (a instanceof Ref ? a.value : a);
+  const flatNums = (a: any): number[] => {
+    a = unref(a);
+    return Array.isArray(a) || ArrayBuffer.isView(a) ? Array.from(a as ArrayLike<any>).flatMap(flatNums) : [Number(a) || 0];
+  };
+  const SCROLL = { NO_SCROLL: 0, SCROLL_LEFT: 1, SCROLL_RIGHT: 2, SCROLL_UP: 3, SCROLL_DOWN: 4 };
+  class ArduinoLEDMatrix {
+    // the matrix
+    private frames: number[][] = [];
+    private cur = 0;
+    private interval = 0;
+    private last = 0;
+    private looping = false;
+    private done = false;
+    private cb: (() => void) | null = null;
+    private ticking = false;
+    // ArduinoGraphics (a global object starts zeroed, as here: no stroke until stroke() is called)
+    private canvas: number[][] = Array.from({ length: 8 }, () => new Array(12).fill(0));
+    private font: { w: number; h: number; glyphs: (number[] | null)[] } | null = null;
+    private strokeOn = false;
+    private sc = 0;
+    private fillOn = false;
+    private fc = 0;
+    private bg = 0;
+    private tc = 0;
+    private textBuf = '';
+    private tx = 0;
+    private ty = 0;
+    private sx = 1;
+    private sy = 1;
+    private gScroll = 0; // (ArduinoGraphics' own speed: 0 until textScrollSpeed() sets it)
+    private mScroll = 100;
+    begin() {
+      if (!init.matrix) warnOnce('nomatrix', 'ArduinoLEDMatrix: this board has no LED matrix (the UNO R4 WiFi has one): nothing shows');
+      if (!this.ticking) {
+        this.ticking = true;
+        // (the real one checks every 0.1 ms: millis() - last > interval. Here it's looked at when the
+        // program waits or loops, so each frame starts when it was due, not when it was noticed)
+        tickers.push(() => {
+          for (let n = 0; n < 200 && this.interval !== 0; n++) {
+            const due = this.last + this.interval + 1;
+            if (now() < due) break;
+            this.next();
+            // (far behind, as autoscroll() without play(): from now on, as the real one does)
+            this.last = now() - due > 1000 ? Math.floor(now()) : due;
+          }
+        });
+      }
+      return 1;
+    }
+    end() {}
+    autoscroll(ms: number) { this.interval = Number(ms) >>> 0; }
+    /** one LED on or off at once (by its number, 0-95) */
+    on(i: number) { this.poke(i, 1); }
+    off(i: number) { this.poke(i, 0); }
+    private poke(i: number, v: number) {
+      const w = this.shownWords();
+      i = Number(i);
+      if (!(i >= 0 && i < 96)) return;
+      const bit = 1 << (31 - (i & 31));
+      w[i >> 5] = (v ? w[i >> 5] | bit : w[i >> 5] & ~bit) >>> 0;
+      matrixShow(w);
+    }
+    private shownWords() {
+      const b = matrixShown ? matrixShown.split(',').map(Number) : new Array(12).fill(0);
+      const w = [0, 0, 0];
+      for (let i = 0; i < 96; i++) if ((b[i >> 3] >> (i & 7)) & 1) w[i >> 5] |= 1 << (31 - (i & 31));
+      return w.map((x) => x >>> 0);
+    }
+    next() {
+      if (!this.frames.length) return;
+      const f = this.frames[this.cur];
+      this.interval = f[3] >>> 0;
+      this.cur = (this.cur + 1) % this.frames.length;
+      if (this.cur === 0) {
+        if (!this.looping) this.interval = 0;
+        this.cb?.();
+        this.done = true;
+      }
+      matrixShow(f);
+    }
+    loadFrame(buf: any) {
+      const w = flatNums(buf);
+      this.frames = [[w[0] >>> 0, w[1] >>> 0, w[2] >>> 0, 0]];
+      this.cur = 0;
+      this.next();
+      this.interval = 0;
+    }
+    renderFrame(n: number) {
+      if (!this.frames.length) return;
+      this.cur = (Number(n) || 0) % this.frames.length;
+      this.next();
+      this.interval = 0;
+    }
+    play(loop = false) {
+      this.looping = !!loop;
+      this.done = false;
+      this.last = Math.floor(now());
+      this.next();
+    }
+    sequenceDone() {
+      if (this.done) { this.done = false; return true; }
+      return false;
+    }
+    loadSequence(frames: any) {
+      const all = flatNums(frames);
+      this.frames = [];
+      for (let i = 0; i + 3 < all.length; i += 4) this.frames.push(all.slice(i, i + 4).map((x) => x >>> 0));
+      this.cur = 0;
+    }
+    loadWrapper(frames: any) { this.loadSequence(frames); }
+    /** a picture as 0/1 pixels: renderBitmap(frame, 8, 12) with uint8_t frame[8][12] */
+    renderBitmap(bitmap: any, rows = 8, cols = 12) { this.loadPixels(bitmap, (Number(rows) || 8) * (Number(cols) || 12)); }
+    loadPixels(arr: any, size = 96) {
+      // (as the real one packs them: one bit each, the top bit first, 32 to a word)
+      const px = flatNums(arr), words: number[] = [];
+      let part = 0;
+      for (let i = 0; i < size; i++) {
+        part = (part | ((px[i] ?? 0) & 255)) >>> 0;
+        if ((i + 1) % 32 === 0) words.push(part);
+        part = (part << 1) >>> 0;
+      }
+      this.loadFrame(words);
+    }
+    setCallback(fn: any) { this.cb = typeof fn === 'function' ? fn : null; }
+    clear() {
+      this.loadFrame([0, 0, 0]);
+      for (const r of this.canvas) r.fill(0);
+    }
+    // --- ArduinoGraphics
+    width() { return 12; }
+    height() { return 8; }
+    beginDraw() {}
+    endDraw() { this.loadPixels(this.canvas, 96); }
+    set(x: number, y: number, r: number, g = r, b = r) {
+      x = Math.trunc(x); y = Math.trunc(y);
+      if (y >= 8 || x >= 12 || y < 0 || x < 0) return;
+      this.canvas[y][x] = ((r | g | b) & 0xffffff) > 0 ? 1 : 0;
+    }
+    private col = (a: any[]) => (a.length >= 3 ? ((a[0] & 255) << 16) | ((a[1] & 255) << 8) | (a[2] & 255) : Number(a[0]) >>> 0) & 0xffffff;
+    background(...a: any[]) { if (!a.length) return this.bg; this.bg = this.col(a); }
+    fill(...a: any[]) { this.fillOn = true; this.fc = this.col(a); }
+    noFill() { this.fillOn = false; }
+    stroke(...a: any[]) { this.strokeOn = true; this.sc = this.col(a); }
+    noStroke() { this.strokeOn = false; }
+    point(x: number, y: number) { if (this.strokeOn) this.set(x, y, this.sc); }
+    line(x1: number, y1: number, x2: number, y2: number) {
+      if (!this.strokeOn) return;
+      [x1, y1, x2, y2] = [x1, y1, x2, y2].map(Math.trunc);
+      if (x1 === x2) { for (let y = y1; y <= y2; y++) this.set(x1, y, this.sc); return; }
+      if (y1 === y2) { for (let x = x1; x <= x2; x++) this.set(x, y1, this.sc); return; }
+      // (Bresenham, as theirs)
+      const steep = Math.abs(y2 - y1) >= Math.abs(x2 - x1);
+      if (!steep && x1 > x2) [x1, y1, x2, y2] = [x2, y2, x1, y1];
+      if (steep && y1 > y2) [x1, y1, x2, y2] = [x2, y2, x1, y1];
+      const dx = x2 - x1, dy = y2 - y1;
+      if (!steep) {
+        const yi = dy < 0 ? -1 : 1, ady = Math.abs(dy);
+        let D = 2 * ady - dx, y = y1;
+        for (let x = x1; x <= x2; x++) { this.set(x, y, this.sc); if (D > 0) { y += yi; D -= 2 * dx; } D += 2 * ady; }
+      } else {
+        const xi = dx < 0 ? -1 : 1, adx = Math.abs(dx);
+        let D = 2 * adx - dy, x = x1;
+        for (let y = y1; y <= y2; y++) { this.set(x, y, this.sc); if (D > 0) { x += xi; D -= 2 * dy; } D += 2 * adx; }
+      }
+    }
+    rect(x: number, y: number, w: number, h: number) {
+      if (!this.strokeOn && !this.fillOn) return;
+      const x1 = Math.trunc(x), y1 = Math.trunc(y), x2 = x1 + Math.trunc(w) - 1, y2 = y1 + Math.trunc(h) - 1;
+      for (let i = x1; i <= x2; i++)
+        for (let j = y1; j <= y2; j++) {
+          if ((i === x1 || i === x2 || j === y1 || j === y2) && this.strokeOn) this.set(i, j, this.sc);
+          else if (this.fillOn) this.set(i, j, this.fc);
+        }
+    }
+    circle(x: number, y: number, d: number) { this.ellipse(x, y, d, d); }
+    ellipse(x: number, y: number, w: number, h: number) {
+      if (!this.strokeOn && !this.fillOn) return;
+      const a = Math.trunc(w / 2), b = Math.trunc(h / 2), a2 = a * a, b2 = b * b;
+      if (this.fillOn) for (let j = -b; j <= b; j++) for (let i = -a; i <= a; i++) if (i * i * b2 + j * j * a2 <= a2 * b2) this.set(x + i, y + j, this.fc);
+      if (this.strokeOn) {
+        for (let i = -a; i <= a; i++) { const yv = Math.trunc(b * Math.sqrt(Math.max(0, 1 - (i * i) / (a2 || 1)))); this.set(x + i, y + yv, this.sc); this.set(x + i, y - yv, this.sc); }
+        for (let j = -b; j <= b; j++) { const xv = Math.trunc(a * Math.sqrt(Math.max(0, 1 - (j * j) / (b2 || 1)))); this.set(x + xv, y + j, this.sc); this.set(x - xv, y + j, this.sc); }
+      }
+    }
+    textFont(f: any) { this.font = f && typeof f === 'object' && Array.isArray(f.glyphs) ? f : null; }
+    textSize(sx: number, sy = sx) { this.sx = Number(sx) > 0 ? Math.trunc(sx) : 1; this.sy = Number(sy) > 0 ? Math.trunc(sy) : 1; }
+    textFontWidth() { return this.font ? this.font.w * this.sx : 0; }
+    textFontHeight() { return this.font ? this.font.h * this.sy : 0; }
+    private bitmap(rows: number[] | null, x: number, y: number, w: number, h: number) {
+      if (!this.strokeOn || !rows || x + w * this.sx < 0 || y + h * this.sy < 0 || x > 12 || y > 8) return;
+      for (let j = 0; j < h; j++) {
+        const b = rows[j] ?? 0;
+        for (let ys = 0; ys < this.sy; ys++) {
+          let xx = x;
+          for (let i = 0; i < w; i++) {
+            const on = b & (1 << (7 - i));
+            for (let xs = 0; xs < this.sx; xs++) this.set(xx++, y, on ? this.sc : this.bg);
+            if (xx >= 12) break;
+          }
+          y++;
+        }
+      }
+    }
+    text(str: any, x = 0, y = 0) {
+      if (!this.font || !this.strokeOn) return;
+      for (const ch of String(str ?? '')) {
+        const c = ch.charCodeAt(0) & 255;
+        if (ch === '\n') y += this.font.h * this.sy;
+        else if (ch === '\r') x = 0;
+        else {
+          this.bitmap(this.font.glyphs[c] ?? this.font.glyphs[0x20] ?? null, x, y, this.font.w, this.font.h);
+          x += this.font.w * this.sx;
+        }
+      }
+    }
+    // Print: what's printed between beginText and endText is the text
+    write(b: any) { this.textBuf += typeof b === 'number' ? String.fromCharCode(b) : String(b); return 1; }
+    print(x: any = '', f?: number) { this.textBuf += fmt(x, f); return 1; }
+    println(x: any = '', f?: number) { this.textBuf += fmt(x, f) + '\r\n'; return 1; }
+    flush() { this.textBuf = ''; }
+    beginText(x = 0, y = 0, ...c: any[]) {
+      this.textBuf = '';
+      this.tx = Math.trunc(x);
+      this.ty = Math.trunc(y);
+      if (c.length) this.tc = this.col(c);
+    }
+    textScrollSpeed(ms = 150) { this.gScroll = this.mScroll = Math.max(0, Number(ms) || 0); }
+    endText(dir = 0) {
+      const keep = [this.strokeOn, this.sc] as const;
+      const space = this.font?.glyphs[0x20] ?? null, fontW = this.font?.w ?? 0, fontH = this.font?.h ?? 0;
+      const t = this.textBuf, n = t.length, fw = this.textFontWidth(), fh = this.textFontHeight();
+      const frame = (draw: () => void) => { draw(); this.endDraw(); api.delay(this.gScroll); };
+      if (dir === SCROLL.SCROLL_LEFT) {
+        const len = n * fw + this.tx + 1;
+        for (let i = 0; i < len; i++) frame(() => {
+          const x = this.tx - i;
+          this.stroke(this.tc); this.text(t, x, this.ty);
+          const cx = x + n * fw;
+          this.stroke(this.bg); this.line(cx, this.ty, cx, this.ty + fh - 1);
+        });
+      } else if (dir === SCROLL.SCROLL_RIGHT) {
+        const len = n * fw + this.tx;
+        for (let i = 0; i < len; i++) frame(() => {
+          const x = this.tx - (len - i - 1);
+          this.stroke(this.tc); this.text(t, x, this.ty);
+          this.stroke(this.bg); this.line(x - 1, this.ty, x - 1, this.ty + fh - 1);
+          this.bitmap(space, x - 1, this.ty, 1, fontH);
+        });
+      } else if (dir === SCROLL.SCROLL_UP) {
+        const len = fh + this.ty + 1;
+        for (let i = 0; i < len; i++) frame(() => {
+          const y = this.ty - i;
+          this.stroke(this.tc); this.text(t, this.tx, y);
+          this.stroke(this.bg); this.line(this.tx, y + fh, this.tx + fw * n - 1, y + fh);
+        });
+      } else if (dir === SCROLL.SCROLL_DOWN) {
+        const len = fh + this.ty;
+        for (let i = 0; i < len; i++) frame(() => {
+          const y = this.ty - (len - i - 1);
+          this.stroke(this.tc); this.text(t, this.tx, y);
+          this.stroke(this.bg); this.line(this.tx, y - 1, this.tx + fw * n - 1, y - 1);
+          this.bitmap(space, this.tx, y - 1, fontW, 1);
+        });
+      } else {
+        this.stroke(this.tc);
+        this.text(t, this.tx, this.ty);
+      }
+      if (keep[0]) this.stroke(keep[1]); else this.noStroke();
+      this.textBuf = '';
+      this.endDraw(); // (the matrix's endText shows the canvas)
+    }
+  }
+  Object.assign(api, { ArduinoLEDMatrix, ...SCROLL, NUM_LEDS: 96, ...MATRIX_FONTS, ...LEDMATRIX_GALLERY });
+
+  // ------------------------------------------------------------------------------- Bluetooth LE (ArduinoBLE)
+  // The board as a BLE peripheral, the thing a phone app connects to. Its services and values go to
+  // the bench (BLE_PIN), where the run panel is the phone: it connects, sees the values (and their
+  // notifications) and writes. As in ArduinoBLE, what the phone did reaches the program only in
+  // BLE.poll(), BLE.central() and central.connected() / BLE.connected(); its event handlers run there.
+  const BLE_EVENTS = { BLEConnected: 0, BLEDisconnected: 1, BLEDiscovered: 2, BLESubscribed: 0, BLEUnsubscribed: 1, BLEWritten: 3, BLEUpdated: 3 };
+  const bleSend = (m: any) => {
+    if (!init.ble) return;
+    const data = Array.from(enc.encode(JSON.stringify(m)));
+    if (data.length > 4096) { warnOnce('blebig', 'Bluetooth: too many services and values to show (most 4 KB of them)'); return; }
+    const raw = { pin: BLE_PIN, proto: protoCode('data'), baud: 0, data };
+    while (!ringWrite(sh.pktOut, ctl, CTL.PKO_HEAD, CTL.PKO_TAIL, raw)) {
+      const s = Atomics.load(ctl, CTL.STEP);
+      Atomics.wait(ctl, CTL.STEP, s, 50);
+    }
+  };
+  const PHONE = '7c:2e:0d:1a:b4:42'; // (the bench's phone)
+  const ble = {
+    begun: false, name: 'Arduino', advertising: false, advService: '', connected: false, central: '', connectable: true,
+    services: [] as BLEService[], chars: new Map<string, BLECharacteristic>(), handlers: new Map<number, (d: any) => void>(),
+  };
+  const bleFire = (ev: number, d: any) => { const f = ble.handlers.get(ev); if (f) f(d); };
+  const bleTable = () => {
+    if (!ble.begun) return;
+    bleSend({
+      t: 'gatt', name: ble.name, adv: ble.advertising, advService: ble.advService, connected: ble.connected,
+      chars: [...ble.chars.values()].map((c) => ({ uuid: c.uuidStr, svc: c.svc, props: c.props, kind: c.kind, size: c.size, bytes: c.bytes, desc: c.desc })),
+    });
+  };
+  const bleUuid = (u: any) => String(u ?? '').trim().toLowerCase();
+  class BLEDescriptor {
+    uuidStr: string;
+    text: string;
+    constructor(uuid: any, value: any = '') { this.uuidStr = bleUuid(uuid); this.text = typeof value === 'string' ? value : ''; }
+    uuid() { return this.uuidStr; }
+  }
+  class BLECharacteristic {
+    uuidStr: string;
+    props: number;
+    size: number;
+    fixed: boolean;
+    kind: BleKind;
+    bytes: number[] = [];
+    svc = '';
+    desc = '';
+    private wasWritten = false;
+    subs = false;
+    handlers = new Map<number, (d: any, c: any) => void>();
+    constructor(uuid: any, props: any = 0, size: any = 0, fixed: any = false, kind: BleKind = 'bytes') {
+      this.uuidStr = bleUuid(uuid);
+      this.props = Number(props) || 0;
+      this.kind = kind;
+      if (typeof size === 'string') { this.bytes = bleEncode('bytes', size); this.size = Math.max(this.bytes.length, 1); }
+      else this.size = Math.max(0, Math.min(512, Number(size) || 0));
+      this.fixed = !!fixed;
+    }
+    uuid() { return this.uuidStr; }
+    properties() { return this.props; }
+    valueSize() { return this.size; }
+    valueLength() { return this.bytes.length; }
+    value(): any { return this.bytes.slice(); }
+    /** (from the phone) */
+    took(bytes: number[]) {
+      this.bytes = bytes.slice(0, this.size || 512);
+      this.wasWritten = true;
+    }
+    readValue(buf: any, len?: number) {
+      const out = unref(buf);
+      const n = Math.min(this.bytes.length, len ?? (Array.isArray(out) || ArrayBuffer.isView(out) ? (out as any).length : 4));
+      if (Array.isArray(out) || ArrayBuffer.isView(out)) { for (let i = 0; i < n; i++) (out as any)[i] = this.bytes[i]; }
+      else if (buf instanceof Ref) buf.value = this.bytes.slice(0, n).reduce((a, b, i) => a + b * 2 ** (8 * i), 0);
+      return n;
+    }
+    protected put(bytes: number[]) {
+      const cut = bytes.slice(0, this.size || 512);
+      const changed = cut.length !== this.bytes.length || cut.some((b, i) => b !== this.bytes[i]);
+      this.bytes = cut;
+      // (to the phone: its new value; a notification if it's subscribed)
+      if (ble.chars.get(this.uuidStr) === this && (changed || this.subs)) bleSend({ t: 'val', uuid: this.uuidStr, bytes: cut });
+      return 1;
+    }
+    writeValue(v: any, len?: any, _withResponse?: any) {
+      v = unref(v);
+      let bytes: number[];
+      if (typeof v === 'number' || typeof v === 'boolean') {
+        // (writeValue(uint8_t / int16_t / int32_t...): as many bytes as the value has room for)
+        const n = typeof len === 'number' ? 0 : Math.min(4, this.size || 1);
+        bytes = bleEncode(n === 1 ? 'u8' : n === 2 ? 'u16' : 'u32', Number(v)).slice(0, n || 1);
+      } else bytes = bleEncode('bytes', v);
+      if (typeof len === 'number') bytes = bytes.slice(0, Math.max(0, len));
+      return this.put(bytes);
+    }
+    setValue(v: any, len?: any) { return this.writeValue(v, len); }
+    broadcast() { return 1; }
+    written() { const w = this.wasWritten; this.wasWritten = false; return w; }
+    subscribed() { return this.subs; }
+    valueUpdated() { return false; }
+    setEventHandler(ev: number, fn: any) { if (typeof fn === 'function') this.handlers.set(Number(ev), fn); }
+    addDescriptor(d: any) { if (d instanceof BLEDescriptor && d.uuidStr === '2901') this.desc = d.text; }
+    descriptorCount() { return this.desc ? 1 : 0; }
+    hasDescriptor(u: any) { return !!this.desc && bleUuid(u) === '2901'; }
+    canRead() { return !!(this.props & BLE_PROPS.BLERead); }
+    canWrite() { return !!(this.props & (BLE_PROPS.BLEWrite | BLE_PROPS.BLEWriteWithoutResponse)); }
+    canSubscribe() { return !!(this.props & (BLE_PROPS.BLENotify | BLE_PROPS.BLEIndicate)); }
+    canUnsubscribe() { return this.canSubscribe(); }
+    read() { return false; }
+    subscribe() { return false; }
+    unsubscribe() { return false; }
+    valueOf() { return true; } // ("if (characteristic)")
+  }
+  const typedChar = (kind: BleKind) =>
+    class extends BLECharacteristic {
+      constructor(uuid: any, props: any = 0) {
+        super(uuid, props, BLE_SIZE[kind], true, kind);
+        this.bytes = bleEncode(kind, 0); // (it starts at 0, as theirs)
+      }
+      value() { return bleDecode(kind, this.bytes); }
+      valueLE() { return this.value(); }
+      valueBE() { return bleDecode(kind, this.bytes.slice().reverse()); }
+      writeValue(v: any) { return this.put(bleEncode(kind, unref(v))); }
+      setValue(v: any) { return this.writeValue(v); }
+      writeValueLE(v: any) { return this.writeValue(v); }
+      writeValueBE(v: any) { return this.put(bleEncode(kind, unref(v)).reverse()); }
+    };
+  class BLEStringCharacteristic extends BLECharacteristic {
+    constructor(uuid: any, props: any = 0, maxLen: any = 20) { super(uuid, props, Number(maxLen) || 20, false, 'string'); }
+    value() { return bleDecode('string', this.bytes); }
+    writeValue(v: any) { return this.put(bleEncode('string', String(unref(v) ?? ''))); }
+    setValue(v: any) { return this.writeValue(v); }
+  }
+  class BLEService {
+    uuidStr: string;
+    chars: BLECharacteristic[] = [];
+    constructor(uuid: any) { this.uuidStr = bleUuid(uuid); }
+    uuid() { return this.uuidStr; }
+    addCharacteristic(c: BLECharacteristic) {
+      if (!(c instanceof BLECharacteristic)) throw new Error('addCharacteristic: that is not a BLE characteristic');
+      c.svc = this.uuidStr;
+      if (!this.chars.includes(c)) this.chars.push(c);
+    }
+    characteristicCount() { return this.chars.length; }
+    hasCharacteristic(u: any) { return this.chars.some((c) => c.uuidStr === bleUuid(u)); }
+    characteristic(x: any) { return typeof x === 'number' ? this.chars[x] ?? null : this.chars.find((c) => c.uuidStr === bleUuid(x)) ?? null; }
+    valueOf() { return true; }
+  }
+  /** the other end of a connection (here: the bench's phone) */
+  class BLEDevice {
+    constructor(private addr = '') {}
+    address() { return this.addr; }
+    connected() { blePoll(); return ble.connected && ble.central === this.addr; }
+    disconnect() { return BLE.disconnect(); }
+    poll() { blePoll(); }
+    rssi() { return ble.connected ? -48 : 127; }
+    hasLocalName() { return true; }
+    localName() { return 'Bench phone'; }
+    deviceName() { return 'Bench phone'; }
+    discoverAttributes() { return false; }
+    connect() { return false; }
+    valueOf() { return true; }
+    toString() { return this.addr; }
+  }
+  let blePolls = 0;
+  const blePoll = () => {
+    if (!ble.begun) return;
+    // (a poll takes the chip a little while, ~20 us talking to its radio: a loop of nothing but
+    //  BLE.poll() runs about as many times a second as on the board, not millions)
+    spend(0.02);
+    pumpIn();
+    const k = `${BLE_PIN}:${protoCode('data')}`;
+    const q = inbox.get(k) ?? [];
+    inbox.delete(k);
+    blePolls++;
+    for (const m of q) {
+      let msg: any;
+      try { msg = JSON.parse(dec.decode(new Uint8Array(m.data))); } catch { continue; }
+      const c = msg.uuid ? ble.chars.get(String(msg.uuid)) : undefined;
+      const central = new BLEDevice(ble.central || PHONE);
+      if (msg.t === 'connect') {
+        if (ble.connected || !ble.advertising || !ble.connectable) continue;
+        ble.connected = true;
+        ble.central = PHONE;
+        ble.advertising = false; // (connected: it stops advertising...)
+        bleTable();
+        bleFire(BLE_EVENTS.BLEConnected, new BLEDevice(PHONE));
+      } else if (msg.t === 'disconnect') {
+        if (!ble.connected) continue;
+        bleDropped();
+      } else if (msg.t === 'write' && c && ble.connected) {
+        if (!(c.props & (BLE_PROPS.BLEWrite | BLE_PROPS.BLEWriteWithoutResponse))) continue;
+        if (c.fixed && msg.bytes.length !== c.size) { warnOnce(`blefix:${c.uuidStr}`, `Bluetooth: the phone wrote ${msg.bytes.length} bytes to ${c.uuidStr}, which takes exactly ${c.size}: ignored`); continue; }
+        c.took(msg.bytes);
+        c.handlers.get(BLE_EVENTS.BLEWritten)?.(central, c);
+      } else if (msg.t === 'sub' && c && ble.connected) {
+        c.subs = !!msg.on;
+        c.handlers.get(c.subs ? BLE_EVENTS.BLESubscribed : BLE_EVENTS.BLEUnsubscribed)?.(central, c);
+      } else if (msg.t === 'read' && c && ble.connected) c.handlers.get(BLE_PROPS.BLERead)?.(central, c);
+    }
+  };
+  const bleDropped = () => {
+    const who = new BLEDevice(ble.central);
+    ble.connected = false;
+    ble.central = '';
+    for (const c of ble.chars.values()) if (c.subs) { c.subs = false; c.handlers.get(BLE_EVENTS.BLEUnsubscribed)?.(who, c); }
+    ble.advertising = true; // (...and advertises again once the phone has gone, as ArduinoBLE does)
+    bleTable();
+    bleFire(BLE_EVENTS.BLEDisconnected, who);
+  };
+  const BLE = {
+    begin() {
+      if (!init.ble) { warnOnce('noble', 'BLE.begin(): this board has no Bluetooth LE (an UNO R4 WiFi or an ESP32 has)'); return 0; }
+      ble.begun = true;
+      bleSend({ t: 'begin' });
+      return 1;
+    },
+    end() { ble.begun = false; ble.advertising = false; ble.connected = false; bleSend({ t: 'end' }); },
+    poll(_ms?: number) { blePoll(); },
+    connected() { blePoll(); return ble.connected; },
+    disconnect() { if (!ble.connected) return false; bleSend({ t: 'dropped' }); bleDropped(); return true; },
+    address() { return MAC.map((b) => b.toString(16).padStart(2, '0')).join(':'); },
+    rssi() { return ble.connected ? -48 : 127; },
+    setLocalName(n: any) { ble.name = String(n ?? ''); bleTable(); return true; },
+    setDeviceName(n: any) { if (!ble.name || ble.name === 'Arduino') ble.name = String(n ?? ''); bleTable(); },
+    setAppearance() {},
+    setAdvertisedServiceUuid(u: any) { ble.advService = bleUuid(u); return true; },
+    setAdvertisedService(s: any) { ble.advService = s instanceof BLEService ? s.uuidStr : bleUuid(s); return true; },
+    setAdvertisedServiceData() { return true; },
+    setManufacturerData() { return true; },
+    setAdvertisingData() {},
+    setScanResponseData() {},
+    addService(s: BLEService) {
+      if (!(s instanceof BLEService)) throw new Error('BLE.addService: that is not a BLEService');
+      if (!ble.services.includes(s)) ble.services.push(s);
+      for (const c of s.chars) ble.chars.set(c.uuidStr, c);
+      bleTable();
+    },
+    advertise() {
+      if (!ble.begun) { warnOnce('bleadv', 'BLE.advertise() before BLE.begin()'); return 0; }
+      if (!ble.connected) ble.advertising = true;
+      bleTable();
+      return 1;
+    },
+    stopAdvertise() { ble.advertising = false; bleTable(); },
+    central() { blePoll(); return ble.connected ? new BLEDevice(ble.central) : null; },
+    available() { blePoll(); return null; },
+    scan() { warnOnce('blescan', 'BLE.scan(): finding other boards over Bluetooth is not in the bench yet (a phone connecting to this board is: the run panel)'); return 1; },
+    scanForName() { return BLE.scan(); },
+    scanForUuid() { return BLE.scan(); },
+    scanForAddress() { return BLE.scan(); },
+    stopScan() {},
+    setEventHandler(ev: any, fn: any) { if (typeof fn === 'function') ble.handlers.set(Number(ev), fn); },
+    setConnectable(b: any) { ble.connectable = !!b; },
+    setAdvertisingInterval() {}, setConnectionInterval() {}, setSupervisionTimeout() {}, setTimeout() {},
+    debug() {}, noDebug() {}, setPairable() {}, pairable: () => false, paired: () => false,
+  };
+  Object.assign(api, {
+    BLE, BLEService, BLECharacteristic, BLEDescriptor, BLEDevice, BLEStringCharacteristic, ...BLE_PROPS, ...BLE_EVENTS,
+    BLEBoolCharacteristic: typedChar('bool'), BLEBooleanCharacteristic: typedChar('bool'), BLECharCharacteristic: typedChar('i8'),
+    BLEUnsignedCharCharacteristic: typedChar('u8'), BLEByteCharacteristic: typedChar('u8'), BLEShortCharacteristic: typedChar('i16'),
+    BLEUnsignedShortCharacteristic: typedChar('u16'), BLEWordCharacteristic: typedChar('u16'), BLEIntCharacteristic: typedChar('i32'),
+    BLEUnsignedIntCharacteristic: typedChar('u32'), BLELongCharacteristic: typedChar('i32'), BLEUnsignedLongCharacteristic: typedChar('u32'),
+    BLEFloatCharacteristic: typedChar('f32'), BLEDoubleCharacteristic: typedChar('f64'),
+  });
+
+  // ------------------------------------------------------------------------------- I2S sound out (ESP32s)
+  // ESP_I2S.h (core 3: I2SClass) and driver/i2s.h (the older i2s_driver_install / i2s_write). The
+  // samples go out on the data pin as messages (a 6-byte header, then 16-bit samples, little-endian),
+  // to an amp wired there (elec/audio.ts). Writing waits as the real DMA buffers do: a write returns
+  // once what's queued is down to the buffers' length, so a program plays in real (simulated) time.
+  const I2S_K = {
+    I2S_NUM_0: 0, I2S_NUM_1: 1, I2S_MODE_MASTER: 1, I2S_MODE_SLAVE: 2, I2S_MODE_TX: 4, I2S_MODE_RX: 8, I2S_MODE_DAC_BUILT_IN: 16, I2S_MODE_ADC_BUILT_IN: 32, I2S_MODE_PDM: 64,
+    I2S_BITS_PER_SAMPLE_8BIT: 8, I2S_BITS_PER_SAMPLE_16BIT: 16, I2S_BITS_PER_SAMPLE_24BIT: 24, I2S_BITS_PER_SAMPLE_32BIT: 32,
+    I2S_CHANNEL_FMT_RIGHT_LEFT: 0, I2S_CHANNEL_FMT_ALL_RIGHT: 1, I2S_CHANNEL_FMT_ALL_LEFT: 2, I2S_CHANNEL_FMT_ONLY_RIGHT: 3, I2S_CHANNEL_FMT_ONLY_LEFT: 4,
+    I2S_COMM_FORMAT_STAND_I2S: 1, I2S_COMM_FORMAT_STAND_MSB: 2, I2S_COMM_FORMAT_STAND_PCM_SHORT: 4, I2S_COMM_FORMAT_STAND_PCM_LONG: 12,
+    I2S_COMM_FORMAT_I2S: 1, I2S_COMM_FORMAT_I2S_MSB: 2, I2S_COMM_FORMAT_I2S_LSB: 4, I2S_CHANNEL_MONO: 1, I2S_CHANNEL_STEREO: 2,
+    I2S_PIN_NO_CHANGE: -1, ESP_INTR_FLAG_LEVEL1: 2, ESP_INTR_FLAG_DEFAULT: 0, portMAX_DELAY: 0xffffffff,
+    I2S_MODE_STD: 0, I2S_MODE_TDM: 1, I2S_MODE_PDM_TX: 2, I2S_MODE_PDM_RX: 3,
+    I2S_DATA_BIT_WIDTH_8BIT: 8, I2S_DATA_BIT_WIDTH_16BIT: 16, I2S_DATA_BIT_WIDTH_24BIT: 24, I2S_DATA_BIT_WIDTH_32BIT: 32,
+    I2S_SLOT_MODE_MONO: 1, I2S_SLOT_MODE_STEREO: 2, I2S_STD_SLOT_LEFT: 1, I2S_STD_SLOT_RIGHT: 2, I2S_STD_SLOT_BOTH: 3,
+  };
+  const i2s = { on: false, rate: 44100, bits: 16, chans: 2, bck: -1, ws: -1, dout: -1, bufFrames: 6 * 240, clock: 0, frames: 0 };
+  const I2S_MAGIC = 0xa5;
+  const needI2s = (fn: string) => {
+    if (!init.i2s) { warnOnce('noi2s', `${fn}: this board has no I2S sound out (an ESP32 has)`); return false; }
+    return true;
+  };
+  /** a buffer the program hands over (an int16_t / int32_t / uint8_t array of `bytes` bytes) as 16-bit samples */
+  const i2sSamples = (buf: any, bytes: number): number[] => {
+    const a = flatNums(buf);
+    const n = Math.max(0, Math.min(Number(bytes) || 0, 1 << 20));
+    if (!a.length || !n) return [];
+    // (bytes per element: as declared (int16_t buf[]: 2), else guessed from the byte count)
+    const ew = unref(buf)?.__ew;
+    const per = ew === 2 || ew === 4 ? ew : Math.max(1, Math.round(n / a.length));
+    const out: number[] = [];
+    if (per === 1) {
+      // raw bytes: little-endian samples of the program's width
+      const w = i2s.bits >> 3;
+      for (let i = 0; i + w <= Math.min(n, a.length); i += w) {
+        if (w === 1) out.push(((a[i] & 255) - 128) << 8);
+        else { const hi = a[i + w - 1] & 255, lo = a[i + w - 2] & 255; const x = (hi << 8) | lo; out.push(x & 0x8000 ? x - 0x10000 : x); }
+      }
+    } else if (per === 2) for (let i = 0; i < Math.min(a.length, n / 2); i++) out.push((a[i] << 16) >> 16);
+    else for (let i = 0; i < Math.min(a.length, n / 4); i++) {
+      const x = a[i] | 0;
+      if (i2s.bits === 32 || i2s.bits === 24) out.push(x >> 16); // (a 32-bit sample: its top 16 bits)
+      else out.push((x << 16) >> 16, x >> 16); // (two 16-bit samples in one word: low half first)
+    }
+    return out;
+  };
+  const i2sOut = (samples: number[]) => {
+    if (!i2s.on) { warnOnce('i2soff', 'I2S: write before it was started (begin / i2s_driver_install)'); return 0; }
+    if (i2s.dout < 0) { warnOnce('i2spins', 'I2S: no data-out pin set (setPins / i2s_set_pin): the sound goes nowhere'); return 0; }
+    const ch = i2s.chans, frames = Math.floor(samples.length / ch);
+    const maxFrames = Math.floor(4090 / 2 / ch);
+    for (let f = 0; f < frames; f += maxFrames) {
+      const n = Math.min(maxFrames, frames - f);
+      // (the DMA buffers: wait until what's queued fits)
+      const t = now();
+      if (i2s.clock < t) i2s.clock = t;
+      const bufMs = (i2s.bufFrames / i2s.rate) * 1000;
+      if (i2s.clock - t > bufMs) waitUntil(i2s.clock - bufMs);
+      const data = [I2S_MAGIC, i2s.rate & 255, (i2s.rate >> 8) & 255, (i2s.rate >> 16) & 255, ch, 16];
+      for (let i = f * ch; i < (f + n) * ch; i++) { const s = Math.max(-32768, Math.min(32767, Math.round(samples[i] ?? 0))); data.push(s & 255, (s >> 8) & 255); }
+      linkSend(i2s.dout, 'raw', data);
+      i2s.clock += (n / i2s.rate) * 1000;
+      i2s.frames += n;
+    }
+    return frames;
+  };
+  class I2SClass {
+    private err = 0;
+    setPins(bclk: number, ws: number, dout: number, _din = -1, _mclk = -1) { i2s.bck = Number(bclk); i2s.ws = Number(ws); i2s.dout = Number(dout); return true; }
+    setPinsPdmTx() { warnOnce('pdm', 'I2S: PDM sound out is not in the bench (standard I2S is: I2S_MODE_STD)'); return false; }
+    setTimeout() {}
+    begin(mode: number, rate: number, bits: number, slot: number, _mask = -1) {
+      if (!needI2s('I2S.begin')) return false;
+      if (Number(mode) !== 0) { warnOnce('i2smode', 'I2S.begin: only I2S_MODE_STD is in the bench'); return false; }
+      Object.assign(i2s, { on: true, rate: Number(rate) || 44100, bits: Number(bits) || 16, chans: Number(slot) === 1 ? 1 : 2, clock: now() });
+      return true;
+    }
+    configureTX(rate: number, bits: number, slot: number) { Object.assign(i2s, { rate: Number(rate) || i2s.rate, bits: Number(bits) || i2s.bits, chans: Number(slot) === 1 ? 1 : 2 }); return true; }
+    end() { i2s.on = false; return true; }
+    /** write(buffer, bytes) or one byte */
+    write(buf: any, len?: number) {
+      if (len === undefined) return typeof buf === 'number' ? 1 : 0;
+      i2sOut(i2sSamples(buf, len));
+      return Number(len) || 0;
+    }
+    /** a WAV file in memory (16-bit PCM): its own rate and channels */
+    playWAV(data: any, len?: number) {
+      const b = flatNums(data).slice(0, len ?? undefined).map((x) => x & 255);
+      const u32 = (i: number) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
+      const tag = (i: number) => String.fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3]);
+      if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') { warnOnce('wav', 'I2S.playWAV: that is not a WAV file'); return; }
+      let at = 12, fmt: { ch: number; rate: number; bits: number } | null = null;
+      const keep = { rate: i2s.rate, chans: i2s.chans, bits: i2s.bits };
+      while (at + 8 <= b.length) {
+        const id = tag(at), size = u32(at + 4);
+        if (id === 'fmt ') fmt = { ch: b[at + 10] | (b[at + 11] << 8), rate: u32(at + 12), bits: b[at + 22] | (b[at + 23] << 8) };
+        if (id === 'data' && fmt) {
+          if (fmt.bits !== 16) { warnOnce('wavbits', `I2S.playWAV: ${fmt.bits}-bit WAV: only 16-bit is in the bench`); return; }
+          Object.assign(i2s, { rate: fmt.rate, chans: Math.min(2, fmt.ch), bits: 16 });
+          i2sOut(i2sSamples(b.slice(at + 8, at + 8 + size), Math.min(size, b.length - at - 8)));
+          Object.assign(i2s, keep);
+          return;
+        }
+        at += 8 + size + (size & 1);
+      }
+    }
+    playMP3() { warnOnce('mp3', 'I2S.playMP3: MP3 is not in the bench (a 16-bit WAV is: playWAV)'); return false; }
+    available() { return 0; }
+    read() { return -1; }
+    readBytes() { return 0; }
+    lastError() { return this.err; }
+    valueOf() { return i2s.on; }
+  }
+  // (the configs as objects, for programs that fill them in one field at a time)
+  class i2s_config_t { mode = 0; sample_rate = 44100; bits_per_sample = 16; channel_format = 0; communication_format = 1; intr_alloc_flags = 0; dma_buf_count = 8; dma_buf_len = 64; use_apll = false; tx_desc_auto_clear = false; fixed_mclk = 0; }
+  class i2s_pin_config_t { mck_io_num = -1; bck_io_num = -1; ws_io_num = -1; data_out_num = -1; data_in_num = -1; }
+  Object.assign(api, {
+    I2SClass, i2s_config_t, i2s_pin_config_t, ...I2S_K,
+    i2s_driver_install(_port: number, cfg: any, _q = 0, _queue: any = null) {
+      if (!needI2s('i2s_driver_install')) return api.ESP_FAIL;
+      const c = unref(cfg) ?? {};
+      const mode = Number(c.mode) || 0;
+      if (mode & I2S_K.I2S_MODE_DAC_BUILT_IN) warnOnce('i2sdac', 'i2s_driver_install: the built-in DAC mode is not in the bench (an amp on I2S pins is)');
+      if (!(mode & I2S_K.I2S_MODE_TX)) warnOnce('i2stx', 'i2s_driver_install: only sending (I2S_MODE_TX) is in the bench');
+      const fmt = Number(c.channel_format) || 0;
+      Object.assign(i2s, {
+        on: true, rate: Number(c.sample_rate) || 44100, bits: Number(c.bits_per_sample) || 16,
+        chans: fmt === I2S_K.I2S_CHANNEL_FMT_ONLY_LEFT || fmt === I2S_K.I2S_CHANNEL_FMT_ONLY_RIGHT ? 1 : 2,
+        bufFrames: (Number(c.dma_buf_count) || 8) * (Number(c.dma_buf_len) || 64), clock: now(),
+      });
+      return api.ESP_OK;
+    },
+    i2s_set_pin(_port: number, pins: any) {
+      const p = unref(pins);
+      if (!p) { warnOnce('i2snopin', 'i2s_set_pin(port, NULL): the built-in DAC is not in the bench'); return api.ESP_FAIL; }
+      if (Number(p.bck_io_num) >= 0) i2s.bck = Number(p.bck_io_num);
+      if (Number(p.ws_io_num) >= 0) i2s.ws = Number(p.ws_io_num);
+      if (Number(p.data_out_num) >= 0) i2s.dout = Number(p.data_out_num);
+      return api.ESP_OK;
+    },
+    i2s_write(_port: number, src: any, size: number, written: any, _ticks?: number) {
+      i2sOut(i2sSamples(src, size));
+      if (written instanceof Ref) written.value = Number(size) || 0;
+      return api.ESP_OK;
+    },
+    i2s_set_sample_rates(_port: number, rate: number) { i2s.rate = Number(rate) || i2s.rate; return api.ESP_OK; },
+    i2s_set_clk(_port: number, rate: number, bits: number, ch: number) { Object.assign(i2s, { rate: Number(rate) || i2s.rate, bits: Number(bits) || i2s.bits, chans: Number(ch) === 1 ? 1 : 2 }); return api.ESP_OK; },
+    i2s_zero_dma_buffer() { return api.ESP_OK; },
+    i2s_start() { return api.ESP_OK; },
+    i2s_stop() { return api.ESP_OK; },
+    i2s_driver_uninstall() { i2s.on = false; return api.ESP_OK; },
+  });
+
   // ------------------------------------------------------------------------------- messages on wires
   // Faster than pin changes: a serial port's bytes, an LED strip's pixels, a sensor's answer. They
   // go to the parts wired to that pin (layout.ts rings; the simulation side is sketchBoard).
@@ -1188,6 +1911,8 @@ function run(init: Start) {
     __u32: (x: number) => Math.trunc(Number(x)) >>> 0,
     __char: (x: any) => (typeof x === 'number' ? (x < 0 ? '' : String.fromCharCode(x & 0xff)) : x),
     __struct: (o: any, fields: string[], vals: any[]) => { vals.forEach((v, i) => { if (fields[i] !== undefined) o[fields[i]] = v; }); return o; },
+    /** an array of 16- or 32-bit numbers ("int16_t buf[256];"): its element size, for byte counts (I2S) */
+    __sized: (a: any[], w: number) => { try { Object.defineProperty(a, '__ew', { value: w }); } catch { /* frozen */ } return a; },
     __strReplace: (str: any, a: any, b: any) => String(str).split(String(a)).join(String(b)),
     memset: (arr: any, v: number, n?: number) => { if (arr && typeof arr.fill === 'function') arr.fill(v, 0, n === undefined ? undefined : Math.min(arr.length, n)); return arr; },
     memcpy: (dst: any, src: any, n: number) => {
@@ -1316,6 +2041,7 @@ function run(init: Start) {
       if (!loop) { waitUntil(now() + 1000); continue; }
       loop();
       whileWaiting();
+      for (const t of tickers) t(); // (a loop() that never waits still plays the matrix's animation)
       if (++n % 64 === 0 && now() - lastFlush > 30) flush();
     }
   } catch (e) {

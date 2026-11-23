@@ -1,6 +1,7 @@
 // Breakout modules (common I2C chips on small boards) and the RP2040 board: their shapes and pins.
 // What they do is in elec/modules.ts.
 import { boxMesh, group, headerRow } from './geo';
+import { screenMesh } from '../lib/format';
 import type { ParamDef, PartType, PinDef } from './types';
 
 const P = 0.254; // 0.1 inch pitch, cm
@@ -212,7 +213,8 @@ export const esp32Board: PartType = {
 
 // ------------------------------------------------------------------------------------------ UNO-layout Wi-Fi board
 // Pin for pin like the UNO R4 WiFi (D0-D13, A0-A5 = 14-19, 5 V logic, PWM on 3 5 6 9 10 11, LED on 13,
-// WiFiS3: WiFi.begin waits until connected), so sketches written for one run unchanged.
+// WiFiS3: WiFi.begin waits until connected), so sketches written for one run unchanged. Its 12 x 8 red
+// LED matrix too (Arduino_LED_Matrix.h, ArduinoGraphics.h: sketch/worker.ts ArduinoLEDMatrix).
 const unoTop = ['SCL', 'SDA', 'AREF', 'GND3', 'D13', 'D12', 'D11', 'D10', 'D9', 'D8', 'D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'];
 const unoBottom = ['IOREF', 'RESET', '3V3', '5V', 'GND', 'GND2', 'VIN', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
 export const UNO_PINS: Record<string, number> = { SDA: 18, SCL: 19 };
@@ -224,7 +226,7 @@ export const unoWifiBoard: PartType = {
   id: 'uno-wifi-board',
   name: 'Wi-Fi board (UNO layout)',
   category: 'Boards',
-  description: 'A Wi-Fi board laid out pin for pin like the UNO R4 WiFi: D0-D13, A0-A5, 5 V logic, PWM on 3, 5, 6, 9, 10, 11, its LED on 13. Sketches for it (#include <WiFiS3.h>, WiFiServer, WiFi.begin waiting until connected) run unchanged. USB powered, or 6-24 V on VIN.',
+  description: 'A Wi-Fi board laid out pin for pin like the UNO R4 WiFi: D0-D13, A0-A5, 5 V logic, PWM on 3, 5, 6, 9, 10, 11, its LED on 13, and its 12 x 8 red LED matrix (#include "Arduino_LED_Matrix.h": pictures, animations, scrolling text with ArduinoGraphics). Sketches for it (#include <WiFiS3.h>, WiFiServer, WiFi.begin waiting until connected) run unchanged. USB powered, or 6-24 V on VIN.',
   swatch: '#1b7a8c',
   programmable: 'sketch',
   params: [{ key: 'usb', label: 'USB cable plugged in (5 V)', kind: 'bool' }],
@@ -239,6 +241,10 @@ export const unoWifiBoard: PartType = {
     for (const p of ['D3', 'D5', 'D6', 'D9', 'D10', 'D11']) extra[p] = { ...(extra[p] ?? {}), label: `${p} (~PWM)` };
     const at = (ids: string[], z: number, x0: number) => ids.map((id, i) => ({ id, body: 'body', pos: [x0 + i * P, 0.68, z] as [number, number, number], kind: kinds[id] ?? 'io', ...(extra[id] ?? {}) }));
     const topX = -w / 2 + 1.7, botX = -w / 2 + 2.4;
+    // the LED matrix: 12 x 8 red LEDs, about 23 x 15 mm, beside the chip
+    const matrix = screenMesh({ id: 'matrix', size: [2.3, 1.55], px: [12, 8], mode: 'pixels', on: '#ff2a12', off: '#24292b', bg: '#16353a', dots: false });
+    matrix.position.set(-0.65, 0.161, 1.55);
+    (matrix.material as { toneMapped: boolean }).toneMapped = false; // (lit LEDs at full brightness)
     return {
       bodies: [{
         name: 'body', pos: [0, 0.08, 0], mass: 25,
@@ -249,6 +255,7 @@ export const unoWifiBoard: PartType = {
           boxMesh(1.4, 1.1, 0.9, '#1c1d21', -w / 2 + 0.6, 0.6, 1.8), // barrel jack
           boxMesh(1.3, 0.12, 1.3, '#151618', 0.6, 0.14, 0.2), // the chip
           boxMesh(1.2, 0.16, 0.7, '#cfd3da', 2.3, 0.16, 0.2), // Wi-Fi module
+          matrix,
           led,
           headerRow(unoTop.length, P, topX, 0.08, -d / 2 + 0.15),
           headerRow(unoBottom.length, P, botX, 0.08, d / 2 - 0.15),

@@ -19,6 +19,8 @@ function boardDevice(b: BoardDef, v: PartView, hooks: DeviceHooks) {
     builtinLed: b.builtinLed,
     ledActiveLow: b.ledActiveLow,
     wifi: b.wifi,
+    ble: b.ble,
+    i2s: b.i2s,
     wifiWaits: b.wifiWaits,
     shorts: b.shorts,
     i2c: b.i2c,

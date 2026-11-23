@@ -225,6 +225,7 @@ export class App {
   private toastHost = el('div', { className: 'toast-host' });
   private statusEls = { mode: el('span', { className: 'mode-pill mode-build', textContent: 'BUILD' }), parts: el('span'), time: el('span'), log: el('span', { id: 'log' }) };
   private readouts: (() => void)[] = [];
+  private controlsRedraw = 0;
   private fps = 0;
 
   constructor(private R: typeof RAPIER_NS) {
@@ -1092,6 +1093,14 @@ export class App {
         log: (m, l) => this.log(m, l),
         program: (uid) => this.project.programs[uid],
         error: (uid, line, msg) => this.dock.markError(uid, line, msg),
+        // (a board's Bluetooth phone buttons come and go: the run panel is drawn again, a moment later)
+        controlsChanged: () => {
+          if (this.controlsRedraw) return;
+          this.controlsRedraw = window.setTimeout(() => {
+            this.controlsRedraw = 0;
+            if (this.mode !== 'build' && this.sim) this.refreshInspector();
+          }, 30);
+        },
       };
       const devices = views.map((v) => DEVICE_MAKERS[v.inst.type]?.(v, hooks, this.project) ?? null).filter((d): d is Device => !!d);
       for (const d of devices) if (PART_BY_ID.get(d.view.inst.type)?.programmable) this.dock.appendSerial(d.view.inst.uid, '\n--- run started ---\n');
@@ -2194,7 +2203,8 @@ export class App {
       'Wire (C): click a pin, then another. Program: write the selected board\'s code. ' +
       'Finding a part: type in the search box at the top of the parts list (Ctrl+F; Enter picks the first one). The Libraries window has its own search. ' +
       'Mechanics: gears mesh when their teeth meet (by tooth count); pulleys turn together through a belt (select one, Belt to...); an Axle (free) holds gears and pulleys; a Tank track has its own motor; mecanum and omni wheels drive any way. ' +
-      'ESP32s talk to each other with ESP-NOW (esp_now.h, by MAC address), and BluetoothSerial shows in the serial monitor marked [BT]. A PS2 controller (library) is played with a game pad plugged into this PC, or the keyboard (arrows, 1-4, Q / E, Enter, I J K L). ' +
+      'ESP32s talk to each other with ESP-NOW (esp_now.h, by MAC address), and BluetoothSerial shows in the serial monitor marked [BT]. ' +
+      'Bluetooth LE (ArduinoBLE.h, UNO R4 WiFi and ESP32s): the run panel is a phone: "Phone: connect", see the values, write the writable ones. The UNO R4 WiFi\'s 12 x 8 LED matrix shows what Arduino_LED_Matrix.h / ArduinoGraphics.h draw. A Speaker amp (MAX98357A) plays an ESP32\'s I2S sound (ESP_I2S.h or driver/i2s.h) through a Speaker. Batteries show how long a full charge lasts at the run\'s average draw (and say so when you press Stop).A PS2 controller (library) is played with a game pad plugged into this PC, or the keyboard (arrows, 1-4, Q / E, Enter, I J K L). ' +
       'Flying: a Brushless motor + propeller on an ESC (servo signal from a board: 1000 us to arm, up to 2000 for full thrust); wired straight it turns clockwise, two phase wires swapped counter-clockwise, to suit its propeller. ' +
       'The move / turn arrows sit at the centre of the selected part (Grid menu: or its centre of mass, or its base). ' +
       'API (toolbar): your own programs drive the bench at http://127.0.0.1:7420/ (run, step, positions, buttons, serial; GET / there lists it all; this PC only, never web pages). ' +

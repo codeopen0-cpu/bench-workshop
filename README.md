@@ -46,8 +46,17 @@ It's open source (MIT licence, see [LICENSE](LICENSE)): read it, change it, buil
   the real MicroPython (1.29, bundled) runs on that chip, with its `>>>` prompt in the serial monitor.
 - **Wi-Fi boards** (ESP32, UNO R4 WiFi layout) join the bench's own network and serve real web pages
   on this PC (127.0.0.1 only; nothing reaches the internet).
+- **Bluetooth LE** (`ArduinoBLE.h`, on the UNO R4 WiFi and ESP32s): the run panel is the phone. It
+  connects, shows the board's values as they change (and its notifications) and writes the writable
+  ones, so a sketch for a phone app can be tried before there's a phone or a board.
+- **The UNO R4 WiFi's LED matrix** (12 x 8): `Arduino_LED_Matrix.h` pictures, its gallery and
+  animations, and `ArduinoGraphics.h` text and shapes, the way the real ones draw them.
+- **Sound:** an I2S speaker amp (MAX98357A) and a speaker play an ESP32's sound (`ESP_I2S.h`, or
+  `driver/i2s.h`), as loud as the amp's gain and supply make it.
 - **Power** that behaves like the real thing: AA, 9 V, coin cells, 18650s, LiPo packs, power banks
-  and a bench supply, with their voltage curves, sag under load and brown-outs.
+  and a bench supply, with their voltage curves, sag under load and brown-outs. Each shows how long
+  a full charge lasts at what the run draws on average (AAs give less at a big current, as real
+  ones do), and says so when you press Stop.
 - **Modules** that act like the real chips: servo driver (PCA9685), motion sensor (MPU-6050), IO
   expander (MCP23017), analog inputs (ADS1115), power meter (INA226), memory (24C02).
 - **Libraries**: add-on parts (displays, sensors, radios, cameras...) downloaded from the
@@ -158,4 +167,6 @@ MIT: see [LICENSE](LICENSE). It uses three.js (MIT), Rapier (Apache-2.0), rp2040
 (MIT) and Tauri (MIT / Apache-2.0); the RP2040 demo firmware is built with arduino-pico (LGPL-2.1),
 whose source it is built from is in `firmware/rp2040-demo`. The bundled MicroPython firmware
 (`public/firmware/micropython-rpi-pico-v1.29.0.uf2`, unchanged from micropython.org) is MIT
-licensed: see `public/firmware/MICROPYTHON-LICENSE.txt`.
+licensed: see `public/firmware/MICROPYTHON-LICENSE.txt`. The UNO R4 WiFi's LED matrix pictures come
+from Arduino's Arduino_LED_Matrix library (MIT), and its two fonts from Arduino's ArduinoGraphics
+(MPL-2.0: `src/sketch/ledmatrix-fonts.ts` stays under it); see `tools/vendor/ledmatrix`.

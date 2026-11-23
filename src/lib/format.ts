@@ -478,8 +478,9 @@ function boxAround(visual: THREE.Object3D, solid: THREE.Object3D[]) {
   return { shape: { kind: 'box' as const, hx: Math.max(0.02, size.x / 2), hy: Math.max(0.02, size.y / 2), hz: Math.max(0.02, size.z / 2) }, pos: centre.toArray() as V3 };
 }
 
-/** A flat screen: a canvas the part's code draws on (pixels or characters). */
-function screenMesh(s: LibScreen) {
+/** A flat screen: a canvas the part's code draws on (pixels or characters). (Built-in parts use it
+ *  too: the UNO R4 WiFi's LED matrix.) */
+export function screenMesh(s: LibScreen) {
   const [cols, rows] = s.px;
   const text = s.mode === 'text';
   const rgb = s.mode === 'rgb';

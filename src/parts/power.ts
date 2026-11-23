@@ -9,17 +9,22 @@ export interface Chemistry {
   /** volts of one cell at a state of charge (1 = full, 0 = flat) */
   curve(soc: number): number;
   ohms: number; // internal resistance of one cell
-  mAh: number; // capacity of one cell (for the default size)
+  mAh: number; // capacity of one cell (for the default size), at its rated (small) current
+  /** how much less it gives at a bigger current (Peukert): capacity x (ref / amps) ^ (k - 1), never more
+   *  than its rating. An alkaline AA gives ~2500 mAh at 25 mA but only ~1200 at 500 mA (Energizer E91). */
+  rate?: { ref: number; k: number };
 }
 export const CHEM: Record<string, Chemistry> = {
-  alkaline: { label: 'Alkaline', curve: (s) => 1.0 + 0.58 * Math.pow(s, 0.6), ohms: 0.15, mAh: 2500 },
-  nimh: { label: 'NiMH rechargeable', curve: (s) => 1.0 + 0.3 * Math.pow(s, 0.25), ohms: 0.03, mAh: 2000 },
-  lithiumAA: { label: 'Lithium (AA)', curve: (s) => 1.45 + 0.3 * Math.pow(s, 0.2), ohms: 0.1, mAh: 3000 },
-  liion: { label: 'Li-ion', curve: (s) => 3.0 + 1.2 * Math.pow(s, 0.7), ohms: 0.04, mAh: 3000 },
+  alkaline: { label: 'Alkaline', curve: (s) => 1.0 + 0.58 * Math.pow(s, 0.6), ohms: 0.15, mAh: 2500, rate: { ref: 0.025, k: 1.25 } },
+  nimh: { label: 'NiMH rechargeable', curve: (s) => 1.0 + 0.3 * Math.pow(s, 0.25), ohms: 0.03, mAh: 2000, rate: { ref: 0.4, k: 1.05 } },
+  lithiumAA: { label: 'Lithium (AA)', curve: (s) => 1.45 + 0.3 * Math.pow(s, 0.2), ohms: 0.1, mAh: 3000, rate: { ref: 0.1, k: 1.04 } },
+  liion: { label: 'Li-ion', curve: (s) => 3.0 + 1.2 * Math.pow(s, 0.7), ohms: 0.04, mAh: 3000, rate: { ref: 0.6, k: 1.03 } },
   lipo: { label: 'LiPo', curve: (s) => 3.0 + 1.2 * Math.pow(s, 0.7), ohms: 0.015, mAh: 1000 },
-  alk9v: { label: '9 V alkaline', curve: (s) => 1.0 + 0.6 * Math.pow(s, 0.6), ohms: 0.28, mAh: 550 }, // six small cells
-  coin: { label: 'Lithium coin', curve: (s) => 2.0 + 1.05 * Math.pow(s, 0.35), ohms: 15, mAh: 220 },
+  alk9v: { label: '9 V alkaline', curve: (s) => 1.0 + 0.6 * Math.pow(s, 0.6), ohms: 0.28, mAh: 550, rate: { ref: 0.025, k: 1.3 } }, // six small cells
+  coin: { label: 'Lithium coin', curve: (s) => 2.0 + 1.05 * Math.pow(s, 0.35), ohms: 15, mAh: 220, rate: { ref: 0.0002, k: 1.2 } },
 };
+/** what fraction of its rated capacity a cell gives at this current */
+export const rateFactor = (ch: Chemistry, amps: number) => (ch.rate && amps > ch.rate.ref ? Math.pow(ch.rate.ref / amps, ch.rate.k - 1) : 1);
 
 const charge: ParamDef = { key: 'charge', label: 'Charge at the start', kind: 'number', min: 0, max: 100, step: 5, unit: '%' };
 const leads = (x: number, y: number, z: number, gap = 0.6): PinDef[] => [

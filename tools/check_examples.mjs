@@ -12,7 +12,7 @@
 // Edge, which comes with Windows (or set EDGE=<path to a Chromium browser>). The report goes to
 // tools/examples-report.md.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,10 @@ console.log(`packed ${entries.length} libraries into ${libDir}`);
 const up = async () => { try { return (await fetch(URL_)).ok; } catch { return false; } };
 if (await up()) throw new Error(`something already answers on ${URL_}: an example check still running? (stop it first)`);
 console.log(`starting its own dev server on ${URL_} ...`);
-const vite = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', '--port', String(VITE_PORT), '--strictPort'], { cwd: root, stdio: 'ignore', shell: process.platform === 'win32', env: { ...process.env, BENCH_STILL: '1' } });
+// (its output goes to tools/examplecheck-vite.log: when examples can't load their files, it says why)
+const viteLog = openSync(join(here, 'examplecheck-vite.log'), 'w');
+const vite = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite', '--port', String(VITE_PORT), '--strictPort'], { cwd: root, stdio: ['ignore', viteLog, viteLog], shell: process.platform === 'win32', env: { ...process.env, BENCH_STILL: '1' } });
+vite.on('exit', (code) => console.log(`  (its dev server stopped, code ${code}: see tools/examplecheck-vite.log)`));
 for (let i = 0; i < 60 && !(await up()); i++) await new Promise((r) => setTimeout(r, 1000));
 if (!(await up())) throw new Error(`its dev server did not start on port ${VITE_PORT}`);
 
@@ -69,7 +72,7 @@ const browser = spawn(edge, [
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** the page, through the browser's debugging port (connected again after the page crashes) */
-let ws = null, id = 0;
+let ws = null, id = 0, pageErrors = 0;
 const pending = new Map();
 async function connect() {
   let page = null;
@@ -91,6 +94,10 @@ async function connect() {
       if (t.startsWith('[examples]')) console.log(t);
     }
     if (msg.method === 'Inspector.targetCrashed') console.log('  (the page crashed)');
+    if (msg.method === 'Runtime.exceptionThrown' && pageErrors++ < 5) {
+      const d = msg.params.exceptionDetails;
+      console.log(`  (page error: ${d.exception?.description?.split('\n').slice(0, 3).join(' | ') ?? d.text} at ${d.url ?? ''}:${d.lineNumber ?? ''})`);
+    }
   };
   ws.onclose = () => { for (const res of pending.values()) res({ error: { message: 'the page went away' } }); pending.clear(); };
   await call('Runtime.enable');
@@ -111,10 +118,18 @@ const evaluate = async (expression, timeoutMs = 30000) => {
 /** (re)open the page and install the packed libraries; the examples there are */
 async function ready() {
   await connect();
-  for (let i = 0; i < 60; i++) {
-    try { if (await evaluate('typeof window.bench === "object" && !!window.bench.checkExamples')) break; } catch { /* loading */ }
-    await sleep(500);
+  // (a cold dev server on a busy or low-memory PC can take a minute to build the page)
+  const t = Date.now();
+  let loaded = false;
+  while (!loaded && Date.now() - t < 120000) {
+    try { loaded = !!(await evaluate('typeof window.bench === "object" && !!window.bench.checkExamples')); } catch { /* loading */ }
+    if (!loaded) await sleep(500);
   }
+  if (!loaded) {
+    const st = await evaluate('({ ready: document.readyState, url: location.href, title: document.title, scripts: document.scripts.length })').catch((e) => e.message);
+    throw new Error(`the app page did not finish loading within 120 s (a busy or low-memory PC?): ${JSON.stringify(st)}`);
+  }
+  console.log(`page loaded in ${((Date.now() - t) / 1000).toFixed(1)} s`);
   return evaluate(`bench.checkExamples(${JSON.stringify({ only, fromPacked: '/tools/examplecheck-libs/', listOnly: true })})`, 120000);
 }
 

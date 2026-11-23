@@ -1,0 +1,21 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "ESP32 speaker (I2S)",
+ "parts": [
+  { "uid": "esp", "type": "esp32-board", "name": "ESP32", "params": { "usb": true }, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1] },
+  { "uid": "amp", "type": "i2s-amp", "name": "Speaker amp", "params": {}, "parent": null, "pos": [7, 0, 0], "rot": [0, 0, 0, 1] },
+  { "uid": "spk", "type": "speaker", "name": "Speaker", "params": {}, "parent": null, "pos": [13, 0, 0], "rot": [0, 0, 0, 1] }
+ ],
+ "wires": [
+  { "id": "w1", "a": { "uid": "esp", "pin": "IO26" }, "b": { "uid": "amp", "pin": "BCLK" }, "color": "#4a90e2", "length": 12 },
+  { "id": "w2", "a": { "uid": "esp", "pin": "IO25" }, "b": { "uid": "amp", "pin": "LRC" }, "color": "#9b59b6", "length": 12 },
+  { "id": "w3", "a": { "uid": "esp", "pin": "IO22" }, "b": { "uid": "amp", "pin": "DIN" }, "color": "#f08a24", "length": 12 },
+  { "id": "w4", "a": { "uid": "esp", "pin": "3V3" }, "b": { "uid": "amp", "pin": "VIN" }, "color": "#e04848", "length": 12 },
+  { "id": "w5", "a": { "uid": "esp", "pin": "GND" }, "b": { "uid": "amp", "pin": "GND" }, "color": "#2b2d33", "length": 12 },
+  { "id": "w6", "a": { "uid": "amp", "pin": "SPK+" }, "b": { "uid": "spk", "pin": "+" }, "color": "#e04848", "length": 8 },
+  { "id": "w7", "a": { "uid": "amp", "pin": "SPK-" }, "b": { "uid": "spk", "pin": "-" }, "color": "#2b2d33", "length": 8 }
+ ],
+ "programs": { "esp": { "lang": "arduino", "source": "@i2s-speaker.ino" } },
+ "boards": []
+}

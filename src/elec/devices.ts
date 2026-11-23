@@ -6,9 +6,11 @@ import type { PinDef } from '../parts/types';
 import type { Program, Project } from '../project';
 import { arduinoToJs } from '../sketch/arduino';
 import { SketchHost } from '../sketch/host';
-import { CTL, ESPNOW_PIN, IN_EVENTS, MODE, SPI_SNAP } from '../sketch/layout';
+import { BLE_PIN, CTL, ESPNOW_PIN, IN_EVENTS, MATRIX_PIN, MODE, SPI_SNAP } from '../sketch/layout';
+import { drawScreen, screensOf } from '../lib/format';
+import { BLE_PROPS, bleKindName, bleParse, bleShow, type BleKind } from '../sketch/blecodec';
 import type { PartView } from '../views';
-import type { Circuit, Device, I2CChip } from './circuit';
+import type { Circuit, Control, Device, I2CChip } from './circuit';
 
 export interface DeviceHooks {
   serial(uid: string, text: string): void;
@@ -19,6 +21,8 @@ export interface DeviceHooks {
   error?(uid: string, line: number | null, message: string): void;
   /** the bench's Wi-Fi network (for boards that have Wi-Fi) */
   net?: import('../net/wifi').BenchNetwork;
+  /** a part's run-panel controls changed (a board's Bluetooth started, the phone connected): show them again */
+  controlsChanged?(): void;
 }
 
 export const name = (v: PartView) => v.inst.name;
@@ -33,7 +37,7 @@ const wifiLine = (i: { status: number; ip: string; ap: string | null; server: { 
 export const sketchLibraries = {
   resolve: (includes: string[]): { libs: { name: string; code: string; exports: string[] }[]; classes: string[]; missing: string[]; defines: Record<string, number> } => ({ libs: [], classes: [], missing: includes, defines: {} }),
 };
-const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|ESP32Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|Adafruit_AMG88xx|RPLidar|inc\/rptypes|avr\/.*)\.h$/;
+const BUILTIN_INCLUDES = /^(Arduino|Wire|Servo|ESP32Servo|SPI|SoftwareSerial|HardwareSerial|math|stdint|stdio|stdlib|string|EEPROM|pgmspace|WiFi|WiFiS3|WiFiNINA|WiFi101|WebServer|ESPmDNS|WiFiClient|WiFiServer|Preferences|esp32-hal-ledc|ESP8266WiFi|ESP8266WebServer|ESP8266mDNS|esp_now|esp_wifi|BluetoothSerial|Adafruit_AMG88xx|RPLidar|Arduino_LED_Matrix|ArduinoGraphics|ArduinoBLE|ESP_I2S|driver\/i2s|inc\/rptypes|avr\/.*)\.h$/;
 export const lensMeshes = (v: PartView, flag: string) => {
   const out: THREE.Mesh[] = [];
   for (const b of v.bodies.values()) b.traverse((m) => m.userData[flag] && (m as THREE.Mesh).isMesh && out.push(m as THREE.Mesh));
@@ -337,6 +341,12 @@ export interface BoardSpec {
   pwmPins?: number[];
   /** its on-board LED lights when the pin is LOW (an ESP8266's, an ESP32-C3 SuperMini's) */
   ledActiveLow?: boolean;
+  /** it has the UNO R4 WiFi's 12 x 8 LED matrix (a screen "matrix" on its body; Arduino_LED_Matrix.h) */
+  ledMatrix?: boolean;
+  /** it has Bluetooth LE (ArduinoBLE.h): the run panel is a phone that connects to it */
+  ble?: boolean;
+  /** it has I2S sound out (ESP_I2S.h / driver/i2s.h): an ESP32 */
+  i2s?: boolean;
 }
 
 /** A board running a program (in its own thread). Drives its pins from the program, feeds inputs back. */
@@ -350,6 +360,84 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
   let espnowSent = 0;
   const byNum = new Map(Object.entries(spec.pins).map(([id, n]) => [n, id]));
   const ledMeshes = lensMeshes(v, 'builtinLed');
+  // its LED matrix (the UNO R4 WiFi's): a screen on its body, drawn when the program shows a picture
+  const matrix = spec.ledMatrix ? [...v.bodies.values()].map((b) => screensOf(b).get('matrix')).find((s) => s) ?? null : null;
+  let matrixPics = 0;
+  const showMatrix = (bytes: number[] | null) => {
+    if (!matrix) return;
+    matrix.cells = Array.from({ length: 96 }, (_, i) => (bytes && (bytes[i >> 3] >> (i & 7)) & 1 ? 1 : 0));
+    drawScreen(matrix);
+    if (bytes && ++matrixPics <= 3) console.info(`[matrix] ${name(v)}: picture ${matrixPics}, ${matrix.cells.filter((x) => x).length} of 96 LEDs lit`);
+  };
+  // its Bluetooth LE (ArduinoBLE): the run panel is a phone (like nRF Connect) that connects to it,
+  // shows its values as they change (subscribing to the ones that notify) and writes the writable ones
+  type BleChar = { uuid: string; svc: string; props: number; kind: BleKind; size: number; bytes: number[]; desc?: string; n: number };
+  const ble = { begun: false, name: '', adv: false, connected: false, chars: [] as BleChar[] };
+  const bleLabel = (c: BleChar) => c.desc || (c.uuid.length > 8 ? c.uuid.slice(0, 8) : c.uuid);
+  const toBoard = (m: object) => host?.givePacket(BLE_PIN, 'data', Array.from(new TextEncoder().encode(JSON.stringify(m))), 0);
+  const bleIn = (data: number[]) => {
+    let m: any;
+    try { m = JSON.parse(new TextDecoder().decode(new Uint8Array(data))); } catch { return; }
+    if (m.t === 'begin') {
+      ble.begun = true;
+      console.info(`[ble] ${name(v)}: Bluetooth on`);
+      hooks.controlsChanged?.();
+    } else if (m.t === 'end') {
+      Object.assign(ble, { begun: false, adv: false, connected: false, chars: [] });
+      hooks.controlsChanged?.();
+    } else if (m.t === 'gatt') {
+      const shape = (x: typeof ble) => `${x.name}|${x.adv}|${x.connected}|${x.chars.map((c) => c.uuid + c.props).join(',')}`;
+      const before = shape(ble), was = ble.connected;
+      ble.name = String(m.name ?? '');
+      ble.adv = !!m.adv;
+      ble.connected = !!m.connected;
+      ble.chars = (m.chars ?? []).map((c: BleChar) => ({ ...c, n: ble.chars.find((x) => x.uuid === c.uuid)?.n ?? 0 }));
+      if (ble.connected && !was) {
+        // (a phone app subscribes to what notifies)
+        for (const c of ble.chars) if (c.props & (BLE_PROPS.BLENotify | BLE_PROPS.BLEIndicate)) toBoard({ t: 'sub', uuid: c.uuid, on: true });
+        hooks.log(`${name(v)}: the bench's phone connected to "${ble.name}" (${ble.chars.length} values)`);
+      } else if (!ble.connected && was) hooks.log(`${name(v)}: the phone disconnected`);
+      if (shape(ble) !== before) {
+        console.info(`[ble] ${name(v)} "${ble.name}": ${ble.connected ? 'connected' : ble.adv ? 'advertising' : 'not advertising'}, ${ble.chars.length} values (${ble.chars.map((c) => `${bleLabel(c)} ${c.kind}`).join(', ')})`);
+        hooks.controlsChanged?.();
+      }
+    } else if (m.t === 'val') {
+      const c = ble.chars.find((x) => x.uuid === m.uuid);
+      if (c) { c.bytes = m.bytes ?? []; c.n++; }
+    } else if (m.t === 'dropped') hooks.log(`${name(v)}'s program ended the Bluetooth connection`);
+  };
+  const bleControls = (): Control[] => {
+    if (!ble.begun) return [];
+    const out: Control[] = [{
+      kind: 'button',
+      label: ble.connected ? 'Phone: disconnect' : `Phone: connect to "${ble.name || 'Arduino'}"`,
+      press: (down) => {
+        if (!down) return;
+        if (ble.connected) toBoard({ t: 'disconnect' });
+        else if (!ble.adv) hooks.log(`${name(v)} isn't advertising (BLE.advertise()), so the phone can't find it`, 'warn');
+        else toBoard({ t: 'connect' });
+      },
+    }];
+    if (ble.connected)
+      for (const c of ble.chars)
+        if (c.props & (BLE_PROPS.BLEWrite | BLE_PROPS.BLEWriteWithoutResponse))
+          out.push({
+            kind: 'text', label: `Phone writes ${bleLabel(c)} (${bleKindName[c.kind]})`,
+            send: (t) => {
+              const bytes = bleParse(c.kind, t).slice(0, c.size || 512);
+              if (toBoard({ t: 'write', uuid: c.uuid, bytes })) c.bytes = bytes; // (the phone shows what it wrote)
+              console.info(`[ble] phone wrote ${bleLabel(c)} = ${bleShow(c.kind, bytes)}`);
+            },
+          });
+    return out;
+  };
+  const bleLines = () => {
+    if (!ble.begun) return [];
+    const head = `Bluetooth "${ble.name || 'Arduino'}": ${ble.connected ? 'phone connected' : ble.adv ? 'advertising' : 'not advertising'}`;
+    if (!ble.connected) return [head];
+    return [head, ...ble.chars.filter((c) => c.props & (BLE_PROPS.BLERead | BLE_PROPS.BLENotify | BLE_PROPS.BLEIndicate | BLE_PROPS.BLEWrite))
+      .map((c) => `${bleLabel(c)} = ${bleShow(c.kind, c.bytes)}${c.n > 1 ? ` (${c.n} updates)` : ''}`)];
+  };
   let host: SketchHost | null = null;
   let running = false, crashed = false;
   const prog = hooks.program(uid);
@@ -366,7 +454,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     const includes = [...code.matchAll(/^\s*(?:\/\/\s*)?#\s*include\s*[<"]([^>"]+)[>"]/gm)].map((m) => m[1]).filter((x) => !BUILTIN_INCLUDES.test(x));
     const libs = sketchLibraries.resolve(includes);
     for (const m of libs.missing) c.warnOnce(`inc:${uid}:${m}`, `${name(v)}'s program includes ${m}, which no installed library has: find it under Libraries`, 'bad');
-    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences', 'esp_now_peer_info_t', 'BluetoothSerial', 'Adafruit_AMG88xx', 'RPLidar', 'rplidar_response_device_info_t', 'rplidar_response_device_health_t'], { ARDUINO: 10819, ...libs.defines, ...spec.defines });
+    if (prog.lang === 'arduino') code = arduinoToJs(code, [...libs.classes, 'WebServer', 'ESP8266WebServer', 'IPAddress', 'WiFiServer', 'WiFiClient', 'SoftwareSerial', 'Preferences', 'esp_now_peer_info_t', 'BluetoothSerial', 'Adafruit_AMG88xx', 'RPLidar', 'rplidar_response_device_info_t', 'rplidar_response_device_health_t', 'ArduinoLEDMatrix', 'BLEService', 'BLECharacteristic', 'BLEDescriptor', 'BLEDevice', 'BLEStringCharacteristic', 'BLEBoolCharacteristic', 'BLEBooleanCharacteristic', 'BLECharCharacteristic', 'BLEUnsignedCharCharacteristic', 'BLEByteCharacteristic', 'BLEShortCharacteristic', 'BLEUnsignedShortCharacteristic', 'BLEWordCharacteristic', 'BLEIntCharacteristic', 'BLEUnsignedIntCharacteristic', 'BLELongCharacteristic', 'BLEUnsignedLongCharacteristic', 'BLEFloatCharacteristic', 'BLEDoubleCharacteristic', 'I2SClass', 'i2s_config_t', 'i2s_pin_config_t'], { ARDUINO: 10819, ...libs.defines, ...spec.defines });
     else code = code.replace(/^\s*#\s*include.*$/gm, '');
     const constants: Record<string, number> = { ...libs.defines, ...spec.defines, ...spec.constants };
     for (const [id, n] of Object.entries(spec.pins)) if (/^[A-Za-z_]\w*$/.test(id) && !/^GP\d+$/.test(id)) constants[id] = n;
@@ -392,7 +480,7 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
       },
       warn: (msg) => c.warnOnce(`w:${uid}:${msg}`, `${name(v)}: ${msg}`),
       state: (s) => s === 'loop' && hooks.log(`${name(v)}: program running (setup() done)`),
-    }, !!spec.wifi, !!spec.wifiWaits, { adcBits: spec.adc?.bits, pwmPins: spec.pwmPins });
+    }, !!spec.wifi, !!spec.wifiWaits, { adcBits: spec.adc?.bits, pwmPins: spec.pwmPins, matrix: !!matrix, ble: !!spec.ble, i2s: !!spec.i2s });
     running = true;
     wifiShown = '';
   };
@@ -400,6 +488,11 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     host?.terminate();
     host = null;
     running = false;
+    showMatrix(null); // (no power, no picture)
+    if (ble.begun) {
+      Object.assign(ble, { begun: false, adv: false, connected: false, chars: [] });
+      hooks.controlsChanged?.();
+    }
   };
   let lastPowered = false;
   let dropWarned = false;
@@ -492,6 +585,14 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
         for (const p of h.takePackets()) {
           if (p.proto === 'spi') {
             spiTo(c, p.data.slice(0, SPI_SNAP), p.data.slice(SPI_SNAP), false);
+            continue;
+          }
+          if (p.pin === MATRIX_PIN) {
+            showMatrix(p.data);
+            continue;
+          }
+          if (p.pin === BLE_PIN) {
+            bleIn(p.data);
             continue;
           }
           const id = byNum.get(p.pin);
@@ -595,7 +696,9 @@ export function sketchBoard(v: PartView, spec: BoardSpec, hooks: DeviceHooks): D
     status: () => [
       !lastPowered ? 'no power' : crashed ? `program stopped: ${host?.error ?? 'error'}` : running ? `program ${host?.state === 'loop' ? 'running' : host?.state ?? ''}` : 'no program',
       ...(spec.wifi && lastPowered ? [wifiLine(hooks.net?.info(uid))] : []),
+      ...bleLines(),
     ],
+    controls: spec.ble ? bleControls : undefined,
     sendSerial: (t) => host?.sendSerial(t),
     packets(list) {
       if (!host) return;

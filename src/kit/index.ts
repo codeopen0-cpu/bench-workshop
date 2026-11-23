@@ -14,6 +14,8 @@ import { escDevice } from '../elec/aero';
 import { SENSORS } from '../parts/sensors';
 import { acs712Device, amg8833Device, rplidarDevice, voltageSensorDevice, warmObjectDevice } from '../elec/sensors';
 import { motorDevice } from '../elec/devices';
+import { AUDIO } from '../parts/audio';
+import { i2sAmpDevice, speakerDevice } from '../elec/audio';
 
 export function registerKit() {
   registerParts(MODULES);
@@ -22,6 +24,8 @@ export function registerKit() {
   registerParts(AERO);
   registerParts(COURSES);
   registerParts(SENSORS);
+  registerParts(AUDIO);
+  Object.assign(DEVICE_MAKERS, { 'i2s-amp': (v: Parameters<typeof i2sAmpDevice>[0]) => i2sAmpDevice(v), speaker: (v: Parameters<typeof speakerDevice>[0]) => speakerDevice(v) });
   Object.assign(DEVICE_MAKERS, MODULE_DEVICES, POWER_DEVICES, BOARD_DEVICES, { 'tank-track': (v: Parameters<typeof motorDevice>[0]) => motorDevice(v), esc: (v: Parameters<typeof escDevice>[0]) => escDevice(v), acs712: (v: Parameters<typeof acs712Device>[0]) => acs712Device(v), 'voltage-sensor': (v: Parameters<typeof voltageSensorDevice>[0]) => voltageSensorDevice(v),
     amg8833: (v: Parameters<typeof amg8833Device>[0]) => amg8833Device(v), 'rplidar-a1': (v: Parameters<typeof rplidarDevice>[0]) => rplidarDevice(v), 'warm-object': (v: Parameters<typeof warmObjectDevice>[0]) => warmObjectDevice(v) });
   console.info(`[kit] ${MODULES.length} modules and ${BOARDS.length} more boards registered`);

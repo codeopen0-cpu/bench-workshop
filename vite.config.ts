@@ -150,6 +150,12 @@ const boardWeb = (): Plugin => ({
 // use to share pin states with the simulation (the Tauri app sets the same headers, see tauri.conf.json).
 export default defineConfig({
   clearScreen: false,
+  // (the example check's server has a config of its own (BENCH_STILL): with one shared cache, each
+  //  server threw the other's pre-bundled packages away, and a page left with stale links couldn't
+  //  load its workers mid-run)
+  // (and it finds every package up front, workers' too: one found mid-run was bundled again, the page
+  //  then had two copies of three.js, and the line sensors' pictures came out blank)
+  ...(process.env.BENCH_STILL ? { cacheDir: 'node_modules/.vite-examples', optimizeDeps: { entries: ['index.html', 'src/**/*.ts'] } } : {}),
   plugins: [registry(), boardWeb()],
   server: {
     port: 1420,

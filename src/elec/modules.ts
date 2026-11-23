@@ -218,6 +218,8 @@ function esp32Device(v: PartView, hooks: DeviceHooks): Device {
     logicV: 3.3,
     builtinLed: 2,
     wifi: true,
+    ble: true,
+    i2s: true,
     shorts: [['GND', 'GND2'], ['GND', 'GND3']],
     i2c: { sda: 'IO21', scl: 'IO22' },
     spi: { sck: 'IO18', mosi: 'IO23', miso: 'IO19', ss: 'IO5' },
@@ -252,6 +254,8 @@ function unoWifiDevice(v: PartView, hooks: DeviceHooks): Device {
     analog: UNO_ANALOG,
     logicV: 5,
     builtinLed: 13,
+    ledMatrix: true,
+    ble: true,
     wifi: true,
     wifiWaits: true,
     shorts: [['GND', 'GND2'], ['GND', 'GND3'], ['SDA', 'A4'], ['SCL', 'A5']], // (SDA/SCL are A4/A5 on this layout)

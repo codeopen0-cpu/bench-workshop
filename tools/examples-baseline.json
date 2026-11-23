@@ -1,7 +1,67 @@
 {
  "seconds": 8,
- "saved": "2026-11-22T21:40:57.387Z",
+ "saved": "2026-11-23T01:31:27.612Z",
  "results": [
+  {
+   "id": "app/Bluetooth face (UNO R4)",
+   "name": "Bluetooth face (UNO R4)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "UNO R4 WiFi": 1
+   },
+   "lastLine": {
+    "UNO R4 WiFi": "advertising as \"Robot face\""
+   },
+   "pieces": {
+    "UNO R4 WiFi": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6814
+  },
+  {
+   "id": "app/ESP32 speaker (I2S)",
+   "name": "ESP32 speaker (I2S)",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "ESP32": 28
+   },
+   "lastLine": {
+    "ESP32": "note 784"
+   },
+   "pieces": {
+    "ESP32": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Speaker amp": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    },
+    "Speaker": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6982
+  },
   {
    "id": "app/ESP32 web switch",
    "name": "ESP32 web switch",
@@ -240,6 +300,30 @@
    "wallMs": 6806
   },
   {
+   "id": "app/UNO R4 LED matrix",
+   "name": "UNO R4 LED matrix",
+   "opened": true,
+   "problems": [],
+   "warnings": [],
+   "errors": [],
+   "serial": {
+    "UNO R4 WiFi": 6
+   },
+   "lastLine": {
+    "UNO R4 WiFi": "smile"
+   },
+   "pieces": {
+    "UNO R4 WiFi": {
+     "moved": 0,
+     "maxAway": 0,
+     "up": 1,
+     "fell": false
+    }
+   },
+   "simSeconds": 7.999999999999866,
+   "wallMs": 6842
+  },
+  {
    "id": "app/Wi-Fi remote-control rover",
    "name": "Wi-Fi remote-control rover",
    "opened": true,
@@ -409,14 +493,12 @@
    "opened": true,
    "problems": [],
    "warnings": [],
-   "errors": [
-    "library \"Buzzers and a microphone\": it stopped responding (an endless loop?) and was shut down"
-   ],
+   "errors": [],
    "serial": {
-    "Board": 0
+    "Board": 18
    },
    "lastLine": {
-    "Board": ""
+    "Board": "note 392"
    },
    "pieces": {
     "Board": {
@@ -439,7 +521,7 @@
     }
    },
    "simSeconds": 7.999999999999866,
-   "wallMs": 6640
+   "wallMs": 6931
   },
   {
    "id": "climate-sensors/Weather to serial (BME280)",

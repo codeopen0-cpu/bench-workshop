@@ -1,0 +1,11 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "UNO R4 LED matrix",
+ "parts": [
+  { "uid": "uno", "type": "uno-wifi-board", "name": "UNO R4 WiFi", "params": { "usb": true }, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1] }
+ ],
+ "wires": [],
+ "programs": { "uno": { "lang": "arduino", "source": "@r4-led-matrix.ino" } },
+ "boards": []
+}

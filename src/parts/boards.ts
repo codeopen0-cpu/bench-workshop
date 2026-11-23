@@ -38,6 +38,10 @@ export interface BoardDef {
   defines: Record<string, number>;
   constants?: Record<string, number>;
   wifi?: boolean;
+  /** Bluetooth LE (ArduinoBLE.h): ESP32-S3 / C3 */
+  ble?: boolean;
+  /** I2S sound out (ESP_I2S.h): ESP32-S3 / C3 */
+  i2s?: boolean;
   wifiWaits?: boolean;
   shorts?: [string, string][];
   /** its supply: `vin` takes `vinMin`+ volts (into its regulator); USB feeds `usbPin` with 5 V; it then
@@ -255,7 +259,7 @@ export const ESP32S3: BoardDef = {
   extra: { '5V': { label: '5V (4.5-5.5 V in)', vmin: 4.5, vmax: 6 }, '3V3b': { label: '3V3' }, RST: { pulled: 'up' }, IO8: { label: 'IO8 (SDA)' }, IO9: { label: 'IO9 (SCL)' }, IO48: { label: 'IO48 (RGB LED)' }, IO0: { label: 'IO0 (BOOT)', pulled: 'up' } },
   look: [[1.8, 0.3, 2.6, '#b9bec7', 0, -1.6], [1.8, 0.04, 0.7, '#1c3d6b', 0, -2.85], [0.8, 0.3, 0.55, '#b9bec7', -0.5, 2.9], [0.8, 0.3, 0.55, '#b9bec7', 0.5, 2.9], [0.35, 0.15, 0.35, '#e9e9e9', -0.75, 2.2], [0.35, 0.15, 0.35, '#e9e9e9', 0.75, 2.2]],
   led: [0.3, 1.7, '#e8e8ff'],
-  logicV: 3.3, adc: { bits: 12, vref: 3.3 }, builtinLed: 48, wifi: true,
+  logicV: 3.3, adc: { bits: 12, vref: 3.3 }, builtinLed: 48, wifi: true, ble: true, i2s: true,
   i2c: { sda: 'IO8', scl: 'IO9' }, spi: { sck: 'IO12', mosi: 'IO11', miso: 'IO13', ss: 'IO10' },
   defines: { ...ESP32_VERSION, CONFIG_IDF_TARGET_ESP32S3: 1, ARDUINO_ESP32S3_DEV: 1 },
   constants: { SDA: 8, SCL: 9, LED_BUILTIN: 48, RGB_BUILTIN: 48, TX: 43, RX: 44, __RX1: 18, __TX1: 17 },
@@ -277,7 +281,7 @@ export const ESP32C3: BoardDef = {
   extra: { '5V': { label: '5V (4.5-5.5 V in)', vmin: 4.5, vmax: 6 }, IO8: { label: 'IO8 (SDA, its LED)' }, IO9: { label: 'IO9 (SCL, BOOT)', pulled: 'up' }, IO20: { label: 'IO20 (RX)' }, IO21: { label: 'IO21 (TX)' } },
   look: [[0.6, 0.1, 0.6, '#151618', 0, 0.1], [0.8, 0.3, 0.5, '#b9bec7', 0, -0.9], [1.2, 0.05, 0.3, '#1c3d6b', 0, 0.9]],
   led: [0.45, -0.3, '#4f9cff'],
-  logicV: 3.3, adc: { bits: 12, vref: 3.3 }, builtinLed: 8, ledActiveLow: true, wifi: true,
+  logicV: 3.3, adc: { bits: 12, vref: 3.3 }, builtinLed: 8, ledActiveLow: true, wifi: true, ble: true, i2s: true,
   i2c: { sda: 'IO8', scl: 'IO9' }, spi: { sck: 'IO4', mosi: 'IO6', miso: 'IO5', ss: 'IO7' },
   defines: { ...ESP32_VERSION, CONFIG_IDF_TARGET_ESP32C3: 1, ARDUINO_ESP32C3_DEV: 1 },
   constants: { SDA: 8, SCL: 9, LED_BUILTIN: 8, TX: 21, RX: 20 },

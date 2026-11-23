@@ -83,7 +83,9 @@ export interface CheckOptions {
 export async function checkExamples(app: App, opts: CheckOptions = {}): Promise<ExampleResult[] | string[]> {
   const seconds = opts.seconds ?? 8;
   if (opts.fromPacked) await installFromPacked(typeof opts.fromPacked === 'string' ? opts.fromPacked : undefined);
-  const list = allExamples().filter((x) => (!opts.only || x.id.toLowerCase().includes(opts.only.toLowerCase())) && (!opts.ids || opts.ids.includes(x.id)));
+  // (only: one text, or several separated by commas: "ESP32 speaker,Line-following")
+  const wanted = (opts.only ?? '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
+  const list = allExamples().filter((x) => (!wanted.length || wanted.some((w) => x.id.toLowerCase().includes(w))) && (!opts.ids || opts.ids.includes(x.id)));
   if (opts.listOnly) return list.map((x) => x.id);
   SketchHost.fineTiming = !opts.oldTiming;
   libMailbox.on = !opts.oldTiming;

@@ -1,0 +1,11 @@
+{
+ "format": "bench-workshop",
+ "version": 1,
+ "name": "Bluetooth face (UNO R4)",
+ "parts": [
+  { "uid": "uno", "type": "uno-wifi-board", "name": "UNO R4 WiFi", "params": { "usb": true }, "parent": null, "pos": [0, 0, 0], "rot": [0, 0, 0, 1] }
+ ],
+ "wires": [],
+ "programs": { "uno": { "lang": "arduino", "source": "@ble-face.ino" } },
+ "boards": []
+}

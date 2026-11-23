@@ -48,6 +48,10 @@ export const EVENTS = 8192;
 export const REQ = { I2C_WRITE: 1, I2C_READ: 2, PULSE_IN: 3, WIFI_JOIN: 4, HTTP_LISTEN: 5, SPI: 6, ESPNOW: 7 } as const;
 /** the pin number ESP-NOW messages arrive on (no real pin: the radio) */
 export const ESPNOW_PIN = 254;
+/** the "pin" the UNO R4 WiFi's LED matrix pictures go out on (12 bytes: bit i of byte i>>3 = LED i, row by row) */
+export const MATRIX_PIN = 253;
+/** the "pin" Bluetooth LE messages go both ways on (JSON: the board's services and values, the phone's writes) */
+export const BLE_PIN = 252;
 export const MODE = { INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, INPUT_PULLDOWN: 3, UNUSED: -1 } as const;
 
 // where each array starts in the shared memory (one after another, sized by PINS)

@@ -3,6 +3,8 @@
 // 20 Hz .. 12 kHz, the loudest is a quarter of full scale (under the app's own volume), at most 12
 // play at once, everything goes quiet when the run pauses or stops or the window is hidden, and
 // the toolbar's sound button mutes all of it (remembered).
+// A speaker on an I2S amp (elec/audio.ts) plays a board's samples: pcm(). The same rules: under the
+// same ceiling and mute, quiet when paused / stopped / hidden, and never more than a second queued.
 
 const MAX_VOICES = 12;
 const CEILING = 0.25; // the loudest a library tone can be (of full scale)
@@ -68,16 +70,66 @@ class BenchAudio {
   /** Everything from these parts goes quiet (a run stopped). */
   clear(prefix = '') {
     for (const k of [...this.wanted.keys()]) if (k.startsWith(prefix)) this.wanted.delete(k);
+    for (const k of [...this.streams.keys()]) if (k.startsWith(prefix)) this.stopStream(k);
     this.apply();
   }
-  get playing() { return this.voices.size; }
+  get playing() { return this.voices.size + this.streams.size; }
   /** every tone asked for now (heard on the bench even when the speakers are muted): key, Hz, volume */
   sounding(): [string, number, number][] {
-    return [...this.wanted].map(([k, t]) => [k, t[0], t[1]]);
+    const now = performance.now();
+    const pcm = [...this.levels].filter(([, l]) => now - l.at < 150 && l.vol > 0.002).map(([k, l]) => [k, l.hz, l.vol] as [string, number, number]);
+    return [...[...this.wanted].map(([k, t]) => [k, t[0], t[1]] as [string, number, number]), ...pcm];
+  }
+
+  // ---- samples (a speaker on an I2S amp)
+  private streams = new Map<string, { next: number; sources: AudioBufferSourceNode[] }>();
+  private levels = new Map<string, { vol: number; hz: number; at: number }>();
+  /** how loud a speaker is now (0..1) and its main pitch: for its status and the bench's microphones */
+  level(key: string) {
+    const l = this.levels.get(key);
+    return l && performance.now() - l.at < 150 ? l : { vol: 0, hz: 0, at: 0 };
+  }
+  /** A speaker's samples (-1..1) at this rate, played straight after what it was given before (after
+   *  a gap: from now). Too far ahead of the sound card (the run going faster than real time): dropped. */
+  pcm(key: string, samples: Float32Array, rate: number) {
+    if (!samples.length) return;
+    // (its loudness and pitch: what a microphone on the bench hears, even with the sound muted)
+    let sum = 0, cross = 0;
+    for (let i = 0; i < samples.length; i++) {
+      sum += samples[i] * samples[i];
+      if (i && (samples[i - 1] < 0) !== (samples[i] < 0)) cross++;
+    }
+    const rms = Math.sqrt(sum / samples.length);
+    this.levels.set(key, { vol: Math.min(1, rms * 1.41), hz: Math.round((cross / 2) * (rate / samples.length)), at: performance.now() });
+    const silent = this.muted || this.paused || (typeof document !== 'undefined' && document.hidden);
+    const ctx = this.ctx, master = this.master;
+    if (silent || !ctx || !master) { this.stopStream(key); return; }
+    let st = this.streams.get(key);
+    if (!st) this.streams.set(key, (st = { next: 0, sources: [] }));
+    if (st.next < ctx.currentTime + 0.01) st.next = ctx.currentTime + 0.06; // (a gap, or the first: start just ahead)
+    if (st.next > ctx.currentTime + 1) return;
+    const buf = ctx.createBuffer(1, samples.length, Math.max(3000, Math.min(96000, rate)));
+    const clamped = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) clamped[i] = Math.max(-1, Math.min(1, samples[i]));
+    buf.copyToChannel(clamped, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(master);
+    src.start(st.next);
+    st.next += buf.duration;
+    st.sources.push(src);
+    src.onended = () => { const i = st!.sources.indexOf(src); if (i >= 0) st!.sources.splice(i, 1); };
+  }
+  private stopStream(key: string) {
+    const st = this.streams.get(key);
+    if (!st) return;
+    for (const s of st.sources) try { s.stop(); } catch { /* already */ }
+    this.streams.delete(key);
   }
 
   private apply() {
     const silent = this.muted || this.paused || (typeof document !== 'undefined' && document.hidden);
+    if (silent) for (const k of [...this.streams.keys()]) this.stopStream(k);
     const ctx = this.ctx, master = this.master;
     // stop voices that shouldn't play
     for (const [k, v] of this.voices)
